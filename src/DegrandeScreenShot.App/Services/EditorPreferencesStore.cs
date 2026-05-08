@@ -58,12 +58,15 @@ internal sealed record EditorPreferences(
     string ShapeColor,
     string ArrowColor,
     string ArrowStyle,
+    List<ArrowShapePresetPreference>? ArrowShapePresets,
+    string? SelectedArrowPresetId,
     string TextColor,
     double TextFontSize,
     double TextBackgroundOpacity,
     double TextBackgroundStrength,
     string ObscureColor,
     string ObscureMode,
+    double? ObscureColorStrength,
     double ObscureBlurLevel,
     double ObscurePixelationLevel)
 {
@@ -72,12 +75,27 @@ internal sealed record EditorPreferences(
         ShapeColor: "#FF125B50",
         ArrowColor: "#FFF2A23A",
         ArrowStyle: "BrushStroke",
+        ArrowShapePresets: [],
+        SelectedArrowPresetId: null,
         TextColor: "#FF6C4B16",
         TextFontSize: 26,
         TextBackgroundOpacity: 0.80,
         TextBackgroundStrength: 0.30,
-        ObscureColor: "#FF111827",
+        ObscureColor: "#FFD94841",
         ObscureMode: "Blur",
-        ObscureBlurLevel: 0.72,
-        ObscurePixelationLevel: 0.00);
+        ObscureColorStrength: 0.10,
+        ObscureBlurLevel: 0.00,
+        ObscurePixelationLevel: 0.25);
 }
+
+internal sealed record ArrowShapePresetPreference(
+    string Id,
+    double TailScale,
+    double BodyScale,
+    double FrontScale,
+    double HeadScale,
+    double ShadowStrength,
+    double BorderWidth,
+    List<ArrowPresetPointPreference>? BendPoints);
+
+internal sealed record ArrowPresetPointPreference(double U, double V);

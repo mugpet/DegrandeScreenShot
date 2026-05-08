@@ -23,6 +23,8 @@ jobs:
       PUBLISH_DIR: artifacts/publish/win-x64
       INSTALLER_DIR: artifacts/installer
       PORTABLE_DIR: artifacts/portable
+      WINDOWS_CODESIGN_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE_BASE64 }}
+      WINDOWS_CODESIGN_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE_PASSWORD }}
 
     steps:
       - name: Check out repository
@@ -73,6 +75,24 @@ jobs:
             -p:InformationalVersion=${{ steps.version.outputs.value }} `
             -o $env:PUBLISH_DIR
 
+      - name: Sign published app
+        if: ${{ env.WINDOWS_CODESIGN_CERTIFICATE_BASE64 != '' && env.WINDOWS_CODESIGN_CERTIFICATE_PASSWORD != '' }}
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "degrande-codesign.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_CERTIFICATE_BASE64))
+
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $signtool) {
+            throw "signtool.exe was not found on the runner."
+          }
+
+          & $signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certPath /p $env:WINDOWS_CODESIGN_CERTIFICATE_PASSWORD "$env:PUBLISH_DIR\DegrandeScreenShot.App.exe"
+
       - name: Create portable package
         shell: pwsh
         run: |
@@ -90,6 +110,28 @@ jobs:
           New-Item -ItemType Directory -Force -Path $env:INSTALLER_DIR | Out-Null
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           & $iscc "/DAppVersion=${{ steps.version.outputs.value }}" "/DPublishDir=$env:GITHUB_WORKSPACE\$env:PUBLISH_DIR" "/DOutputDir=$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR" "$env:GITHUB_WORKSPACE\installer\DegrandeScreenShot.iss"
+
+      - name: Sign installer
+        if: ${{ env.WINDOWS_CODESIGN_CERTIFICATE_BASE64 != '' && env.WINDOWS_CODESIGN_CERTIFICATE_PASSWORD != '' }}
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "degrande-codesign.pfx"
+          if (-not (Test-Path $certPath)) {
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_CERTIFICATE_BASE64))
+          }
+
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $signtool) {
+            throw "signtool.exe was not found on the runner."
+          }
+
+          Get-ChildItem $env:INSTALLER_DIR -Filter *.exe | ForEach-Object {
+            & $signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certPath /p $env:WINDOWS_CODESIGN_CERTIFICATE_PASSWORD $_.FullName
+          }
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
