@@ -1,0 +1,49 @@
+<Window x:Class="DegrandeScreenShot.App.SnapshotPreviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="280"
+        Height="220"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        Topmost="True"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Title="Capture Preview">
+    <Border Background="#F2131917"
+            BorderBrush="#332A3330"
+            BorderThickness="1"
+            CornerRadius="18"
+            SnapsToDevicePixels="True">
+        <Grid Margin="10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="#FF0E1412"
+                    BorderBrush="#1FFFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    ClipToBounds="True">
+                <Image x:Name="PreviewImage"
+                       Stretch="Uniform"
+                       Margin="0" />
+            </Border>
+
+            <StackPanel Grid.Row="1" Margin="4,10,4,2">
+                <TextBlock Foreground="White"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           Text="Snapshot captured" />
+                <TextBlock x:Name="DimensionsText"
+                           Margin="0,2,0,0"
+                           Foreground="#FFD4DEDA"
+                           FontSize="12"
+                           Text="" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>
