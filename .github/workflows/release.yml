@@ -1,0 +1,110 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version to publish, for example 0.1.0"
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    env:
+      SOLUTION_PATH: DegrandeScreenShot.sln
+      APP_PROJECT: src/DegrandeScreenShot.App/DegrandeScreenShot.App.csproj
+      PUBLISH_DIR: artifacts/publish/win-x64
+      INSTALLER_DIR: artifacts/installer
+      PORTABLE_DIR: artifacts/portable
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+          }
+          else {
+            $version = "${{ github.ref_name }}" -replace '^v', ''
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Version '$version' must follow semantic versioning (major.minor.patch)."
+          }
+
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore solution
+        run: dotnet restore $env:SOLUTION_PATH
+
+      - name: Test solution
+        run: dotnet test $env:SOLUTION_PATH -c Release --no-restore
+
+      - name: Publish self-contained app
+        shell: pwsh
+        run: |
+          dotnet publish $env:APP_PROJECT `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:Version=${{ steps.version.outputs.value }} `
+            -p:AssemblyVersion=${{ steps.version.outputs.value }}.0 `
+            -p:FileVersion=${{ steps.version.outputs.value }}.0 `
+            -p:InformationalVersion=${{ steps.version.outputs.value }} `
+            -o $env:PUBLISH_DIR
+
+      - name: Create portable package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:PORTABLE_DIR | Out-Null
+          $zipPath = Join-Path $env:PORTABLE_DIR "DegrandeScreenShot-${{ steps.version.outputs.value }}-win-x64-portable.zip"
+          Compress-Archive -Path (Join-Path $env:PUBLISH_DIR '*') -DestinationPath $zipPath -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:INSTALLER_DIR | Out-Null
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=${{ steps.version.outputs.value }}" "/DPublishDir=$env:GITHUB_WORKSPACE\$env:PUBLISH_DIR" "/DOutputDir=$env:GITHUB_WORKSPACE\$env:INSTALLER_DIR" "$env:GITHUB_WORKSPACE\installer\DegrandeScreenShot.iss"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DegrandeScreenShot-${{ steps.version.outputs.value }}
+          path: |
+            ${{ env.INSTALLER_DIR }}/*.exe
+            ${{ env.PORTABLE_DIR }}/*.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            ${{ env.INSTALLER_DIR }}/*.exe
+            ${{ env.PORTABLE_DIR }}/*.zip
