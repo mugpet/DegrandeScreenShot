@@ -10,6 +10,7 @@ using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using DegrandeScreenShot.App.Services;
 using Microsoft.Win32;
 using Brush = System.Windows.Media.Brush;
 using Pen = System.Windows.Media.Pen;
@@ -25,6 +26,12 @@ public partial class EditorWindow : Window
     internal static readonly Color DefaultAccentColor = Color.FromRgb(18, 91, 80);
     internal static readonly Color DefaultArrowColor = Color.FromRgb(242, 162, 58);
     internal static readonly Color DefaultTextColor = Color.FromRgb(108, 75, 22);
+    internal static readonly Color DefaultObscureColor = Color.FromRgb(17, 24, 39);
+    internal const double DefaultTextFontSize = 26;
+    internal const double DefaultTextBackgroundOpacity = 0.80;
+    internal const double DefaultTextBackgroundStrength = 0.30;
+    internal const double DefaultObscureBlurLevel = 0.72;
+    internal const double DefaultObscurePixelationLevel = 0.00;
     private const string WindowsThemeRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
     private const int DwmUseImmersiveDarkModeAttribute = 20;
     private const int DwmBorderColorAttribute = 34;
@@ -62,16 +69,36 @@ public partial class EditorWindow : Window
     private bool _isUpdatingInlineTextEditor;
     private bool _isUpdatingTextBackgroundOpacity;
     private bool _isUpdatingTextBackgroundStrength;
+    private bool _isUpdatingObscureBlurLevel;
+    private bool _isUpdatingObscurePixelationLevel;
     private bool _hasFittedInitialWindowSize;
     private double _zoomLevel = 1.0;
     private Point? _panStartViewportPoint;
     private double _panStartHorizontalOffset;
     private double _panStartVerticalOffset;
     private ThemePreference _themePreference = ThemePreference.System;
+    private Color _lastShapeColor = DefaultAccentColor;
+    private Color _lastArrowColor = DefaultArrowColor;
+    private ArrowStyle _lastArrowStyle = ArrowStyle.BrushStroke;
+    private double _lastArrowTailScale = 1.0;
+    private double _lastArrowBodyScale = 1.0;
+    private double _lastArrowFrontScale = 1.0;
+    private double _lastArrowHeadScale = 1.0;
+    private List<(double U, double V)> _lastArrowRelativeBendPoints = new();
+    private Color _lastTextColor = DefaultTextColor;
+    private double _lastTextFontSize = DefaultTextFontSize;
+    private double _lastTextBackgroundOpacity = DefaultTextBackgroundOpacity;
+    private double _lastTextBackgroundStrength = DefaultTextBackgroundStrength;
+    private Color _lastObscureColor = DefaultObscureColor;
+    private ObscureMode _lastObscureMode = ObscureMode.Blur;
+    private double _lastObscureBlurLevel = DefaultObscureBlurLevel;
+    private double _lastObscurePixelationLevel = DefaultObscurePixelationLevel;
+    private readonly EditorPreferencesStore _preferencesStore = new();
 
     public EditorWindow(BitmapSource baseImage)
     {
         InitializeComponent();
+        ApplyEditorPreferences(_preferencesStore.Load());
         _workingImage = baseImage;
         Loaded += EditorWindow_Loaded;
         SourceInitialized += EditorWindow_SourceInitialized;
@@ -127,6 +154,7 @@ public partial class EditorWindow : Window
         };
 
         ApplyTheme();
+        PersistEditorPreferences();
     }
 
     private void ApplyTheme()
@@ -257,7 +285,7 @@ public partial class EditorWindow : Window
     {
         _contextMenuAnnotation = null;
 
-        foreach (var button in new[] { SelectToolButton, CropToolButton, ArrowToolButton, RectangleToolButton, EllipseToolButton, TextToolButton })
+        foreach (var button in new[] { SelectToolButton, CropToolButton, ArrowToolButton, RectangleToolButton, EllipseToolButton, ObscureToolButton, TextToolButton })
         {
             if (!ReferenceEquals(button, sender))
             {
@@ -358,12 +386,26 @@ public partial class EditorWindow : Window
 
         if (TryBeginExistingAnnotationInteraction(point))
         {
+            if (_dragOperation == DragOperation.Move
+                && _selectedAnnotation is not null
+                && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                var duplicate = _selectedAnnotation.Clone();
+                _annotations.Add(duplicate);
+                _selectedAnnotation = duplicate;
+                _hoveredAnnotation = duplicate;
+            }
+
             RefreshCanvas();
             return;
         }
 
         if (_currentTool == EditorTool.Select)
         {
+            _selectedAnnotation = null;
+            _hoveredAnnotation = null;
+            _contextMenuAnnotation = null;
+            UpdateSelectionAnnotationControls(null);
             BeginViewportPan(e.GetPosition(ArtworkScrollViewer));
             RefreshCanvas();
             return;
@@ -372,7 +414,7 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Text)
         {
             var text = new TextAnnotation { Location = point, Text = string.Empty };
-            text.SetColor(DefaultTextColor);
+            ApplyLastUsedTextStyle(text);
             _annotations.Add(text);
             _selectedAnnotation = text;
             _hoveredAnnotation = text;
@@ -394,7 +436,7 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Rectangle)
         {
             var annotation = new RectangleAnnotation { Bounds = new Rect(point, point) };
-            annotation.SetColor(DefaultAccentColor);
+            annotation.SetColor(_lastShapeColor);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
             _dragOperation = DragOperation.Draw;
@@ -405,7 +447,7 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Ellipse)
         {
             var annotation = new EllipseAnnotation { Bounds = new Rect(point, point) };
-            annotation.SetColor(DefaultAccentColor);
+            annotation.SetColor(_lastShapeColor);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
             _dragOperation = DragOperation.Draw;
@@ -416,7 +458,19 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Arrow)
         {
             var annotation = ArrowAnnotation.Create(point);
-            annotation.SetColor(DefaultArrowColor);
+            annotation.SetColor(_lastArrowColor);
+            ApplyLastUsedArrowStyle(annotation);
+            _annotations.Add(annotation);
+            _selectedAnnotation = annotation;
+            _dragOperation = DragOperation.Draw;
+            RefreshCanvas();
+            return;
+        }
+
+        if (_currentTool == EditorTool.Obscure)
+        {
+            var annotation = new ObscureAnnotation { Bounds = new Rect(point, point) };
+            ApplyLastUsedObscureStyle(annotation);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
             _dragOperation = DragOperation.Draw;
@@ -479,13 +533,19 @@ public partial class EditorWindow : Window
             return false;
         }
 
-        var handle = arrow.HitHandle(point);
-        if (handle is not "Control1" and not "Control2")
+        // Don't add a bend point if the user double-clicked on an existing handle.
+        if (arrow.HitHandle(point) is not null)
         {
             return false;
         }
 
-        arrow.ToggleCornerStyle(handle);
+        if (!arrow.HitTest(point))
+        {
+            return false;
+        }
+
+        arrow.AddBendPointAt(point);
+        CaptureArrowDefaults(arrow);
         _hoveredAnnotation = arrow;
         return true;
     }
@@ -523,6 +583,10 @@ public partial class EditorWindow : Window
             if (_selectedAnnotation is not null)
             {
                 _selectedAnnotation.UpdateFromAnchor(_dragStart.Value, drawPoint, ShouldConstrainAspectRatio());
+                if (_selectedAnnotation is ArrowAnnotation deferredArrow)
+                {
+                    ApplyLastUsedArrowBendPoints(deferredArrow);
+                }
             }
 
             RefreshCanvas();
@@ -581,6 +645,10 @@ public partial class EditorWindow : Window
         {
             case DragOperation.Draw:
                 _selectedAnnotation.UpdateFromAnchor(_dragStart.Value, point, ShouldConstrainAspectRatio());
+                if (_selectedAnnotation is ArrowAnnotation drawingArrow)
+                {
+                    ApplyLastUsedArrowBendPoints(drawingArrow);
+                }
                 break;
             case DragOperation.Move:
                 _selectedAnnotation.Move(point - _dragStart.Value);
@@ -605,6 +673,30 @@ public partial class EditorWindow : Window
 
         var viewportPoint = e.GetPosition(AnnotationCanvas);
         var point = ToDocumentPoint(viewportPoint);
+
+        // If right-clicking a bend handle on the selected arrow, remove that bend point.
+        if (_selectedAnnotation is ArrowAnnotation selectedArrow)
+        {
+            var handle = selectedArrow.HitHandle(point);
+            if (handle is { } h && h.StartsWith("Bend:", StringComparison.Ordinal)
+                && int.TryParse(h.AsSpan(5), out var bendIndex))
+            {
+                selectedArrow.RemoveBendPointAt(bendIndex);
+                CaptureArrowDefaults(selectedArrow);
+                if (AnnotationCanvas.IsMouseCaptured)
+                {
+                    AnnotationCanvas.ReleaseMouseCapture();
+                }
+                _dragStart = null;
+                _dragOperation = DragOperation.None;
+                _activeHandle = null;
+                CommitHistoryState();
+                RefreshCanvas();
+                e.Handled = true;
+                return;
+            }
+        }
+
         var annotation = _annotations.LastOrDefault(candidate => candidate.HitTest(point));
         if (annotation is null)
         {
@@ -626,7 +718,7 @@ public partial class EditorWindow : Window
         _dragStart = null;
         _dragOperation = DragOperation.None;
         _activeHandle = annotation.HitHandle(point);
-        UpdateTextAnnotationControls(annotation as TextAnnotation);
+        UpdateSelectionAnnotationControls(annotation);
         RefreshCanvas();
         e.Handled = true;
     }
@@ -662,12 +754,19 @@ public partial class EditorWindow : Window
 
         _dragStart = null;
         var shouldCommitHistory = _dragOperation is DragOperation.Draw or DragOperation.Move or DragOperation.Handle or DragOperation.CropCreate or DragOperation.CropMove or DragOperation.CropResize;
+        var capturedOperation = _dragOperation;
         _dragOperation = DragOperation.None;
         _activeCropHandle = CropHandle.None;
         _cropDragOrigin = null;
         _activeHandle = null;
         _panStartViewportPoint = null;
         AnnotationCanvas.ReleaseMouseCapture();
+        if (capturedOperation is DragOperation.Draw or DragOperation.Move or DragOperation.Handle
+            && _selectedAnnotation is ArrowAnnotation finishedArrow)
+        {
+            CaptureArrowDefaults(finishedArrow);
+        }
+
         if (shouldCommitHistory)
         {
             CommitHistoryState();
@@ -725,6 +824,24 @@ public partial class EditorWindow : Window
         if (sender is Button button && button.Tag is string colorValue && ColorConverter.ConvertFromString(colorValue) is Color color)
         {
             _contextMenuAnnotation.SetColor(color);
+            switch (_contextMenuAnnotation)
+            {
+                case RectangleAnnotation:
+                case EllipseAnnotation:
+                    _lastShapeColor = color;
+                    break;
+                case ArrowAnnotation:
+                    _lastArrowColor = color;
+                    break;
+                case TextAnnotation:
+                    _lastTextColor = color;
+                    break;
+                case ObscureAnnotation:
+                    _lastObscureColor = color;
+                    break;
+            }
+
+            PersistEditorPreferences();
             CommitHistoryState();
             RefreshCanvas();
         }
@@ -743,11 +860,13 @@ public partial class EditorWindow : Window
         }
 
         textAnnotation.SetFontSize(fontSize);
+        _lastTextFontSize = fontSize;
         if (ReferenceEquals(_editingTextAnnotation, textAnnotation))
         {
             InlineTextEditor.FontSize = fontSize;
         }
 
+        PersistEditorPreferences();
         CommitHistoryState();
         RefreshCanvas();
     }
@@ -761,7 +880,9 @@ public partial class EditorWindow : Window
 
         var opacity = TextBackgroundOpacitySlider.Value / 100d;
         textAnnotation.SetBackgroundOpacity(opacity);
+        _lastTextBackgroundOpacity = textAnnotation.BackgroundOpacity;
         TextBackgroundOpacityValueText.Text = $"{(int)Math.Round(TextBackgroundOpacitySlider.Value)}%";
+        PersistEditorPreferences();
         CommitHistoryState();
         RefreshCanvas();
     }
@@ -775,7 +896,43 @@ public partial class EditorWindow : Window
 
         var strength = TextBackgroundStrengthSlider.Value / 100d;
         textAnnotation.SetBackgroundColorStrength(strength);
+        _lastTextBackgroundStrength = textAnnotation.BackgroundColorStrength;
         TextBackgroundStrengthValueText.Text = $"{(int)Math.Round(TextBackgroundStrengthSlider.Value)}%";
+        PersistEditorPreferences();
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void ObscureBlurLevelSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_isUpdatingObscureBlurLevel || _contextMenuAnnotation is not ObscureAnnotation obscureAnnotation)
+        {
+            return;
+        }
+
+        var blurLevel = ObscureBlurLevelSlider.Value / 100d;
+        obscureAnnotation.SetBlurLevel(blurLevel);
+        _lastObscureBlurLevel = obscureAnnotation.BlurLevel;
+        ObscureBlurLevelValueText.Text = $"{(int)Math.Round(ObscureBlurLevelSlider.Value)}%";
+        UpdateObscureAnnotationControls(obscureAnnotation);
+        PersistEditorPreferences();
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void ObscurePixelationLevelSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_isUpdatingObscurePixelationLevel || _contextMenuAnnotation is not ObscureAnnotation obscureAnnotation)
+        {
+            return;
+        }
+
+        var pixelationLevel = ObscurePixelationLevelSlider.Value / 100d;
+        obscureAnnotation.SetPixelationLevel(pixelationLevel);
+        _lastObscurePixelationLevel = obscureAnnotation.PixelationLevel;
+        ObscurePixelationLevelValueText.Text = $"{(int)Math.Round(ObscurePixelationLevelSlider.Value)}%";
+        UpdateObscureAnnotationControls(obscureAnnotation);
+        PersistEditorPreferences();
         CommitHistoryState();
         RefreshCanvas();
     }
@@ -939,6 +1096,89 @@ public partial class EditorWindow : Window
         }
     }
 
+    private void UpdateSelectionAnnotationControls(AnnotationBase? annotation)
+    {
+        UpdateArrowAnnotationControls(annotation as ArrowAnnotation);
+        UpdateTextAnnotationControls(annotation as TextAnnotation);
+        UpdateObscureAnnotationControls(annotation as ObscureAnnotation);
+    }
+
+    private bool _suppressArrowSliderEvents;
+
+    private void UpdateArrowAnnotationControls(ArrowAnnotation? arrowAnnotation)
+    {
+        ArrowOptionsPanel.Visibility = arrowAnnotation is null ? Visibility.Collapsed : Visibility.Visible;
+        if (arrowAnnotation is null) return;
+        _suppressArrowSliderEvents = true;
+        try
+        {
+            ArrowTailSlider.Value = arrowAnnotation.TailScale;
+            ArrowBodySlider.Value = arrowAnnotation.BodyScale;
+            ArrowFrontSlider.Value = arrowAnnotation.FrontScale;
+            ArrowHeadSlider.Value = arrowAnnotation.HeadScale;
+        }
+        finally
+        {
+            _suppressArrowSliderEvents = false;
+        }
+        ArrowTailValueLabel.Text = arrowAnnotation.TailScale.ToString("0.00", CultureInfo.InvariantCulture);
+        ArrowBodyValueLabel.Text = arrowAnnotation.BodyScale.ToString("0.00", CultureInfo.InvariantCulture);
+        ArrowFrontValueLabel.Text = arrowAnnotation.FrontScale.ToString("0.00", CultureInfo.InvariantCulture);
+        ArrowHeadValueLabel.Text = arrowAnnotation.HeadScale.ToString("0.00", CultureInfo.InvariantCulture);
+    }
+
+    private void ArrowTailSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ArrowTailValueLabel is null) return;
+        ArrowTailValueLabel.Text = e.NewValue.ToString("0.00", CultureInfo.InvariantCulture);
+        if (_suppressArrowSliderEvents) return;
+        _lastArrowTailScale = e.NewValue;
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetTailScale(e.NewValue);
+            RefreshCanvas();
+        }
+    }
+
+    private void ArrowBodySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ArrowBodyValueLabel is null) return;
+        ArrowBodyValueLabel.Text = e.NewValue.ToString("0.00", CultureInfo.InvariantCulture);
+        if (_suppressArrowSliderEvents) return;
+        _lastArrowBodyScale = e.NewValue;
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetBodyScale(e.NewValue);
+            RefreshCanvas();
+        }
+    }
+
+    private void ArrowFrontSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ArrowFrontValueLabel is null) return;
+        ArrowFrontValueLabel.Text = e.NewValue.ToString("0.00", CultureInfo.InvariantCulture);
+        if (_suppressArrowSliderEvents) return;
+        _lastArrowFrontScale = e.NewValue;
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetFrontScale(e.NewValue);
+            RefreshCanvas();
+        }
+    }
+
+    private void ArrowHeadSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ArrowHeadValueLabel is null) return;
+        ArrowHeadValueLabel.Text = e.NewValue.ToString("0.00", CultureInfo.InvariantCulture);
+        if (_suppressArrowSliderEvents) return;
+        _lastArrowHeadScale = e.NewValue;
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetHeadScale(e.NewValue);
+            RefreshCanvas();
+        }
+    }
+
     private void UpdateTextAnnotationControls(TextAnnotation? textAnnotation)
     {
         var visibility = textAnnotation is null ? Visibility.Collapsed : Visibility.Visible;
@@ -964,6 +1204,30 @@ public partial class EditorWindow : Window
         _isUpdatingTextBackgroundStrength = false;
     }
 
+    private void UpdateObscureAnnotationControls(ObscureAnnotation? obscureAnnotation)
+    {
+        var visibility = obscureAnnotation is null ? Visibility.Collapsed : Visibility.Visible;
+        ObscureBlurLevelPanel.Visibility = visibility;
+        ObscurePixelationLevelPanel.Visibility = visibility;
+
+        if (obscureAnnotation is null)
+        {
+            return;
+        }
+
+        _isUpdatingObscureBlurLevel = true;
+        var blurPercent = Math.Round(obscureAnnotation.BlurLevel * 100);
+        ObscureBlurLevelSlider.Value = blurPercent;
+        ObscureBlurLevelValueText.Text = $"{(int)blurPercent}%";
+        _isUpdatingObscureBlurLevel = false;
+
+        _isUpdatingObscurePixelationLevel = true;
+        var pixelationPercent = Math.Round(obscureAnnotation.PixelationLevel * 100);
+        ObscurePixelationLevelSlider.Value = pixelationPercent;
+        ObscurePixelationLevelValueText.Text = $"{(int)pixelationPercent}%";
+        _isUpdatingObscurePixelationLevel = false;
+    }
+
     private static string GetPicturesFolder()
     {
         return Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
@@ -980,7 +1244,7 @@ public partial class EditorWindow : Window
         _selectedAnnotation = _annotations.LastOrDefault(annotation => annotation.HitTest(point));
         _hoveredAnnotation = _selectedAnnotation;
         _contextMenuAnnotation = _selectedAnnotation;
-        UpdateTextAnnotationControls(_selectedAnnotation as TextAnnotation);
+        UpdateSelectionAnnotationControls(_selectedAnnotation);
 
         CommitInlineTextEditing();
     }
@@ -992,7 +1256,7 @@ public partial class EditorWindow : Window
 
     private static bool IsDeferredDrawTool(EditorTool tool)
     {
-        return tool is EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Arrow;
+        return tool is EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Arrow or EditorTool.Obscure;
     }
 
     private void BeginDeferredDraw(EditorTool tool, Point point)
@@ -1002,7 +1266,7 @@ public partial class EditorWindow : Window
             case EditorTool.Rectangle:
             {
                 var annotation = new RectangleAnnotation { Bounds = new Rect(point, point) };
-                annotation.SetColor(DefaultAccentColor);
+                annotation.SetColor(_lastShapeColor);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
                 _dragOperation = DragOperation.Draw;
@@ -1011,7 +1275,7 @@ public partial class EditorWindow : Window
             case EditorTool.Ellipse:
             {
                 var annotation = new EllipseAnnotation { Bounds = new Rect(point, point) };
-                annotation.SetColor(DefaultAccentColor);
+                annotation.SetColor(_lastShapeColor);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
                 _dragOperation = DragOperation.Draw;
@@ -1020,13 +1284,100 @@ public partial class EditorWindow : Window
             case EditorTool.Arrow:
             {
                 var annotation = ArrowAnnotation.Create(point);
-                annotation.SetColor(DefaultArrowColor);
+                annotation.SetColor(_lastArrowColor);
+                ApplyLastUsedArrowStyle(annotation);
+                _annotations.Add(annotation);
+                _selectedAnnotation = annotation;
+                _dragOperation = DragOperation.Draw;
+                break;
+            }
+            case EditorTool.Obscure:
+            {
+                var annotation = new ObscureAnnotation { Bounds = new Rect(point, point) };
+                ApplyLastUsedObscureStyle(annotation);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
                 _dragOperation = DragOperation.Draw;
                 break;
             }
         }
+    }
+
+    private void ApplyLastUsedTextStyle(TextAnnotation textAnnotation)
+    {
+        textAnnotation.SetColor(_lastTextColor);
+        textAnnotation.SetFontSize(_lastTextFontSize);
+        textAnnotation.SetBackgroundOpacity(_lastTextBackgroundOpacity);
+        textAnnotation.SetBackgroundColorStrength(_lastTextBackgroundStrength);
+    }
+
+    private void ApplyLastUsedArrowStyle(ArrowAnnotation arrowAnnotation)
+    {
+        arrowAnnotation.SetStyle(ArrowStyle.BrushStroke);
+        arrowAnnotation.SetTailScale(_lastArrowTailScale);
+        arrowAnnotation.SetBodyScale(_lastArrowBodyScale);
+        arrowAnnotation.SetFrontScale(_lastArrowFrontScale);
+        arrowAnnotation.SetHeadScale(_lastArrowHeadScale);
+        ApplyLastUsedArrowBendPoints(arrowAnnotation);
+    }
+
+    private void ApplyLastUsedArrowBendPoints(ArrowAnnotation arrowAnnotation)
+    {
+        arrowAnnotation.BendPoints.Clear();
+        if (_lastArrowRelativeBendPoints.Count == 0)
+        {
+            return;
+        }
+
+        var delta = arrowAnnotation.End - arrowAnnotation.Start;
+        var length = delta.Length;
+        if (length < 0.001)
+        {
+            return;
+        }
+
+        var dir = new Vector(delta.X / length, delta.Y / length);
+        var normal = new Vector(-dir.Y, dir.X);
+        foreach (var (u, v) in _lastArrowRelativeBendPoints)
+        {
+            var p = arrowAnnotation.Start + (dir * (u * length)) + (normal * (v * length));
+            arrowAnnotation.BendPoints.Add(p);
+        }
+    }
+
+    private void CaptureArrowDefaults(ArrowAnnotation arrow)
+    {
+        _lastArrowColor = arrow.StrokeColor;
+        _lastArrowStyle = arrow.Style;
+        _lastArrowTailScale = arrow.TailScale;
+        _lastArrowBodyScale = arrow.BodyScale;
+        _lastArrowFrontScale = arrow.FrontScale;
+        _lastArrowHeadScale = arrow.HeadScale;
+
+        _lastArrowRelativeBendPoints = new List<(double U, double V)>();
+        var delta = arrow.End - arrow.Start;
+        var length = delta.Length;
+        if (length < 0.001 || arrow.BendPoints.Count == 0)
+        {
+            return;
+        }
+
+        var dir = new Vector(delta.X / length, delta.Y / length);
+        var normal = new Vector(-dir.Y, dir.X);
+        foreach (var bend in arrow.BendPoints)
+        {
+            var rel = bend - arrow.Start;
+            var u = ((rel.X * dir.X) + (rel.Y * dir.Y)) / length;
+            var v = ((rel.X * normal.X) + (rel.Y * normal.Y)) / length;
+            _lastArrowRelativeBendPoints.Add((u, v));
+        }
+    }
+
+    private void ApplyLastUsedObscureStyle(ObscureAnnotation obscureAnnotation)
+    {
+        obscureAnnotation.SetColor(_lastObscureColor);
+        obscureAnnotation.SetBlurLevel(_lastObscureBlurLevel);
+        obscureAnnotation.SetPixelationLevel(_lastObscurePixelationLevel);
     }
 
     private void UpdateHoveredAnnotation(Point point)
@@ -1100,7 +1451,7 @@ public partial class EditorWindow : Window
 
     private bool ShouldConstrainAspectRatio()
     {
-        return Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && (_selectedAnnotation is RectangleAnnotation or EllipseAnnotation);
+        return Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && (_selectedAnnotation is RectangleAnnotation or EllipseAnnotation or ObscureAnnotation);
     }
 
     private void ApplyWorkingImage(BitmapSource bitmapSource)
@@ -1199,30 +1550,27 @@ public partial class EditorWindow : Window
         }
 
         _contextMenuAnnotation = _selectedAnnotation;
-        UpdateTextAnnotationControls(_selectedAnnotation as TextAnnotation);
+        UpdateSelectionAnnotationControls(_selectedAnnotation);
 
         SelectionActionIsland.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        ToolbarIsland.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var islandWidth = SelectionActionIsland.ActualWidth > 0 ? SelectionActionIsland.ActualWidth : SelectionActionIsland.DesiredSize.Width;
         var islandHeight = SelectionActionIsland.ActualHeight > 0 ? SelectionActionIsland.ActualHeight : SelectionActionIsland.DesiredSize.Height;
-        var bounds = GetAnnotationViewportBounds(_selectedAnnotation);
+        var toolbarWidth = ToolbarIsland.ActualWidth > 0 ? ToolbarIsland.ActualWidth : ToolbarIsland.DesiredSize.Width;
+        var toolbarHeight = ToolbarIsland.ActualHeight > 0 ? ToolbarIsland.ActualHeight : ToolbarIsland.DesiredSize.Height;
         var viewportWidth = ArtworkScrollViewer.ViewportWidth > 0 ? ArtworkScrollViewer.ViewportWidth : ArtworkScrollViewer.ActualWidth;
         var viewportHeight = ArtworkScrollViewer.ViewportHeight > 0 ? ArtworkScrollViewer.ViewportHeight : ArtworkScrollViewer.ActualHeight;
         var viewportOrigin = ArtworkScrollViewer.TranslatePoint(new Point(0, 0), EditorRootGrid);
+        var toolbarOrigin = ToolbarIsland.TranslatePoint(new Point(0, 0), EditorRootGrid);
 
-        if (viewportWidth <= 0 || viewportHeight <= 0)
+        if (viewportWidth <= 0 || viewportHeight <= 0 || toolbarWidth <= 0 || toolbarHeight <= 0)
         {
             SelectionActionIsland.Visibility = Visibility.Collapsed;
             return;
         }
 
-        var targetX = bounds.Left + ((bounds.Width - islandWidth) / 2);
-        var targetY = bounds.Bottom + SelectionActionIslandSpacing;
-        var maxY = viewportOrigin.Y + viewportHeight - islandHeight - SelectionActionIslandViewportPadding - (EditorFooterPanel.ActualHeight > 0 ? EditorFooterPanel.ActualHeight : 0);
-        if (targetY > maxY)
-        {
-            targetY = bounds.Top - islandHeight - SelectionActionIslandSpacing;
-        }
-
+        var targetX = toolbarOrigin.X + ((toolbarWidth - islandWidth) / 2);
+        var targetY = toolbarOrigin.Y - islandHeight - SelectionActionIslandSpacing;
         var minX = viewportOrigin.X + SelectionActionIslandViewportPadding;
         var maxX = viewportOrigin.X + viewportWidth - islandWidth - SelectionActionIslandViewportPadding;
         var minY = viewportOrigin.Y + SelectionActionIslandViewportPadding;
@@ -1233,18 +1581,6 @@ public partial class EditorWindow : Window
         SelectionActionIslandTransform.X = targetX;
         SelectionActionIslandTransform.Y = targetY;
         SelectionActionIsland.Visibility = Visibility.Visible;
-    }
-
-    private Rect GetAnnotationViewportBounds(AnnotationBase annotation)
-    {
-        return annotation switch
-        {
-            RectangleAnnotation rectangle => ToOverlayRect(new Rect(rectangle.Bounds.TopLeft, rectangle.Bounds.BottomRight)),
-            EllipseAnnotation ellipse => ToOverlayRect(new Rect(ellipse.Bounds.TopLeft, ellipse.Bounds.BottomRight)),
-            TextAnnotation text => ToOverlayRect(new Rect(text.Location, text.GetBounds())),
-            ArrowAnnotation arrow => ToOverlayRect(GetArrowBounds(arrow)),
-            _ => new Rect(SelectionActionIslandViewportPadding, SelectionActionIslandViewportPadding, 1, 1),
-        };
     }
 
     private Rect ToOverlayRect(Rect documentRect)
@@ -1261,10 +1597,17 @@ public partial class EditorWindow : Window
 
     private static Rect GetArrowBounds(ArrowAnnotation arrow)
     {
-        var minX = Math.Min(Math.Min(arrow.Start.X, arrow.Control1.X), Math.Min(arrow.Control2.X, arrow.End.X));
-        var minY = Math.Min(Math.Min(arrow.Start.Y, arrow.Control1.Y), Math.Min(arrow.Control2.Y, arrow.End.Y));
-        var maxX = Math.Max(Math.Max(arrow.Start.X, arrow.Control1.X), Math.Max(arrow.Control2.X, arrow.End.X));
-        var maxY = Math.Max(Math.Max(arrow.Start.Y, arrow.Control1.Y), Math.Max(arrow.Control2.Y, arrow.End.Y));
+        var minX = Math.Min(arrow.Start.X, arrow.End.X);
+        var minY = Math.Min(arrow.Start.Y, arrow.End.Y);
+        var maxX = Math.Max(arrow.Start.X, arrow.End.X);
+        var maxY = Math.Max(arrow.Start.Y, arrow.End.Y);
+        foreach (var bend in arrow.BendPoints)
+        {
+            if (bend.X < minX) minX = bend.X;
+            if (bend.Y < minY) minY = bend.Y;
+            if (bend.X > maxX) maxX = bend.X;
+            if (bend.Y > maxY) maxY = bend.Y;
+        }
         return new Rect(new Point(minX - 12, minY - 12), new Point(maxX + 12, maxY + 12));
     }
 
@@ -1452,6 +1795,34 @@ public partial class EditorWindow : Window
 
         var normalized = NormalizeCropRect(cropRect);
         return documentPoint - new Vector(normalized.X, normalized.Y);
+    }
+
+    internal BitmapSource? CreatePixelatedObscureSource(Rect documentRect, double pixelationLevel)
+    {
+        if (BaseImage.Source is not BitmapSource sourceBitmap)
+        {
+            return null;
+        }
+
+        var viewportTopLeft = ToViewportPoint(documentRect.TopLeft);
+        var left = (int)Math.Clamp(Math.Round(viewportTopLeft.X), 0, Math.Max(0, sourceBitmap.PixelWidth - 1));
+        var top = (int)Math.Clamp(Math.Round(viewportTopLeft.Y), 0, Math.Max(0, sourceBitmap.PixelHeight - 1));
+        var width = (int)Math.Clamp(Math.Round(documentRect.Width), 1, sourceBitmap.PixelWidth - left);
+        var height = (int)Math.Clamp(Math.Round(documentRect.Height), 1, sourceBitmap.PixelHeight - top);
+        if (width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        var cropped = new CroppedBitmap(sourceBitmap, new Int32Rect(left, top, width, height));
+        var blockFactor = Math.Max(1, (int)Math.Round(1 + (pixelationLevel * 22)));
+        var reducedWidth = Math.Max(1, cropped.PixelWidth / blockFactor);
+        var reducedHeight = Math.Max(1, cropped.PixelHeight / blockFactor);
+        var scaleX = reducedWidth / (double)cropped.PixelWidth;
+        var scaleY = reducedHeight / (double)cropped.PixelHeight;
+        var reduced = new TransformedBitmap(cropped, new ScaleTransform(scaleX, scaleY));
+        reduced.Freeze();
+        return reduced;
     }
 
     private void BeginViewportPan(Point viewportPoint)
@@ -1796,6 +2167,7 @@ public partial class EditorWindow : Window
         Arrow,
         Rectangle,
         Ellipse,
+        Obscure,
         Text,
     }
 
@@ -1841,7 +2213,8 @@ public partial class EditorWindow : Window
             RectangleAnnotation rectangle => $"rect:{RectToSignature(rectangle.Bounds)}:{ColorToSignature(rectangle.StrokeColor)}",
             EllipseAnnotation ellipse => $"ellipse:{RectToSignature(ellipse.Bounds)}:{ColorToSignature(ellipse.StrokeColor)}",
             TextAnnotation text => $"text:{PointToSignature(text.Location)}:{FormatDouble(text.FontSize)}:{FormatDouble(text.BackgroundOpacity)}:{FormatDouble(text.BackgroundColorStrength)}:{ColorToSignature(text.TextColor)}:{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text.Text ?? string.Empty))}",
-            ArrowAnnotation arrow => $"arrow:{PointToSignature(arrow.Start)}:{PointToSignature(arrow.Control1)}:{PointToSignature(arrow.Control2)}:{PointToSignature(arrow.End)}:{ColorToSignature(arrow.StrokeColor)}:{arrow.Control1IsSharp}:{arrow.Control2IsSharp}",
+            ObscureAnnotation obscure => $"obscure:{RectToSignature(obscure.Bounds)}:{FormatDouble(obscure.BlurLevel)}:{FormatDouble(obscure.PixelationLevel)}:{ColorToSignature(obscure.OverlayColor)}",
+            ArrowAnnotation arrow => $"arrow:{PointToSignature(arrow.Start)}:{PointToSignature(arrow.End)}:{string.Join(",", arrow.BendPoints.Select(PointToSignature))}:{FormatDouble(arrow.ShaftThickness)}:{FormatDouble(arrow.HeadLength)}:{FormatDouble(arrow.HeadWidth)}:{FormatDouble(arrow.OuterEdgeWidth)}:{FormatDouble(arrow.InnerEdgeWidth)}:{FormatDouble(arrow.TailSweep)}:{FormatDouble(arrow.HeadSkew)}:{FormatDouble(arrow.TailScale)}:{FormatDouble(arrow.BodyScale)}:{FormatDouble(arrow.FrontScale)}:{FormatDouble(arrow.HeadScale)}:{ColorToSignature(arrow.StrokeColor)}:{arrow.Style}",
             _ => annotation.GetType().FullName ?? annotation.GetType().Name,
         };
     }
@@ -1866,6 +2239,65 @@ public partial class EditorWindow : Window
     private static string FormatDouble(double value)
     {
         return value.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    private void ApplyEditorPreferences(EditorPreferences preferences)
+    {
+        if (Enum.TryParse<ThemePreference>(preferences.ThemePreference, ignoreCase: true, out var themePreference))
+        {
+            _themePreference = themePreference;
+        }
+
+        _lastShapeColor = ParseColorOrDefault(preferences.ShapeColor, DefaultAccentColor);
+        _lastArrowColor = ParseColorOrDefault(preferences.ArrowColor, DefaultArrowColor);
+        _lastArrowStyle = ArrowStyle.BrushStroke;
+
+        _lastTextColor = ParseColorOrDefault(preferences.TextColor, DefaultTextColor);
+        _lastTextFontSize = preferences.TextFontSize > 0 ? preferences.TextFontSize : DefaultTextFontSize;
+        _lastTextBackgroundOpacity = Math.Clamp(preferences.TextBackgroundOpacity, 0, 1);
+        _lastTextBackgroundStrength = Math.Clamp(preferences.TextBackgroundStrength, 0, 1);
+        _lastObscureColor = ParseColorOrDefault(preferences.ObscureColor, DefaultObscureColor);
+        if (Enum.TryParse<ObscureMode>(preferences.ObscureMode, ignoreCase: true, out var obscureMode))
+        {
+            _lastObscureMode = obscureMode;
+        }
+
+        _lastObscureBlurLevel = Math.Clamp(preferences.ObscureBlurLevel, 0, 1);
+        var savedLightenLevel = Math.Clamp(preferences.ObscurePixelationLevel, 0, 1);
+        var looksLikeLegacyPixelateDefault = string.Equals(preferences.ObscureMode, "Blur", StringComparison.OrdinalIgnoreCase)
+            && Math.Abs(savedLightenLevel - 0.60) < 0.001;
+        _lastObscurePixelationLevel = looksLikeLegacyPixelateDefault
+            ? DefaultObscurePixelationLevel
+            : savedLightenLevel;
+    }
+
+    private void PersistEditorPreferences()
+    {
+        _preferencesStore.Save(new EditorPreferences(
+            ThemePreference: _themePreference.ToString(),
+            ShapeColor: ToPreferenceColor(_lastShapeColor),
+            ArrowColor: ToPreferenceColor(_lastArrowColor),
+            ArrowStyle: _lastArrowStyle.ToString(),
+            TextColor: ToPreferenceColor(_lastTextColor),
+            TextFontSize: _lastTextFontSize,
+            TextBackgroundOpacity: _lastTextBackgroundOpacity,
+            TextBackgroundStrength: _lastTextBackgroundStrength,
+            ObscureColor: ToPreferenceColor(_lastObscureColor),
+                ObscureMode: _lastObscureMode.ToString(),
+                ObscureBlurLevel: _lastObscureBlurLevel,
+                ObscurePixelationLevel: _lastObscurePixelationLevel));
+    }
+
+    private static Color ParseColorOrDefault(string? colorValue, Color fallback)
+    {
+        return !string.IsNullOrWhiteSpace(colorValue) && ColorConverter.ConvertFromString(colorValue) is Color color
+            ? color
+            : fallback;
+    }
+
+    private static string ToPreferenceColor(Color color)
+    {
+        return $"#{color.A:X2}{color.R:X2}{color.G:X2}{color.B:X2}";
     }
 
     private enum ThemePreference
@@ -1991,6 +2423,19 @@ public partial class EditorWindow : Window
     }
 
     private sealed record EditorDocumentState(BitmapSource Image, List<AnnotationBase> Annotations, Rect? AppliedCropRect, Rect? LastCropSelection);
+}
+
+internal enum ObscureMode
+{
+    Blur,
+    Pixelate,
+}
+
+internal enum ArrowStyle
+{
+    Classic,
+    Handdrawn,
+    BrushStroke,
 }
 
 internal abstract class AnnotationBase
@@ -2394,16 +2839,14 @@ internal sealed class EllipseAnnotation : AnnotationBase
 internal sealed class TextAnnotation : AnnotationBase
 {
     private const double MaxTextWidth = 340;
-    private const double DefaultBackgroundOpacity = 0.80;
-    private const double DefaultBackgroundColorStrength = 0.30;
 
     public Color TextColor { get; private set; } = EditorWindow.DefaultTextColor;
 
-    public double FontSize { get; private set; } = 26;
+    public double FontSize { get; private set; } = EditorWindow.DefaultTextFontSize;
 
-    public double BackgroundOpacity { get; private set; } = DefaultBackgroundOpacity;
+    public double BackgroundOpacity { get; private set; } = EditorWindow.DefaultTextBackgroundOpacity;
 
-    public double BackgroundColorStrength { get; private set; } = DefaultBackgroundColorStrength;
+    public double BackgroundColorStrength { get; private set; } = EditorWindow.DefaultTextBackgroundStrength;
 
     public Point Location { get; set; }
 
@@ -2674,91 +3117,391 @@ internal sealed class TextAnnotation : AnnotationBase
     }
 }
 
+internal sealed class ObscureAnnotation : AnnotationBase
+{
+    private const double CornerRadius = 14;
+    private const double BaseBlurRadius = 2;
+    private const double MaxAdditionalBlurRadius = 26;
+
+    public Color OverlayColor { get; private set; } = EditorWindow.DefaultObscureColor;
+
+    public double BlurLevel { get; private set; } = EditorWindow.DefaultObscureBlurLevel;
+
+    public double PixelationLevel { get; private set; } = EditorWindow.DefaultObscurePixelationLevel;
+
+    public Rect Bounds { get; set; }
+
+    public override void Render(Canvas canvas, bool isSelected, bool isHovered)
+    {
+        var normalized = Normalize(Bounds);
+        if (normalized.Width <= 0 || normalized.Height <= 0)
+        {
+            return;
+        }
+
+        var editorWindow = Window.GetWindow(canvas) as EditorWindow;
+        var surface = CreateSurface(editorWindow, normalized, isSelected, isHovered);
+        Canvas.SetLeft(surface, normalized.Left);
+        Canvas.SetTop(surface, normalized.Top);
+        canvas.Children.Add(surface);
+
+        if (isSelected)
+        {
+            AddMarchingAntsRectangle(canvas, normalized, CornerRadius, CornerRadius);
+            AddHandle(canvas, normalized.TopLeft);
+            AddHandle(canvas, normalized.BottomRight);
+        }
+    }
+
+    public override bool HitTest(Point point)
+    {
+        return Normalize(Bounds).Contains(point);
+    }
+
+    public override string? HitHandle(Point point)
+    {
+        var normalized = Normalize(Bounds);
+        if (Distance(normalized.TopLeft, point) <= 10)
+        {
+            return "TopLeft";
+        }
+
+        if (Distance(normalized.BottomRight, point) <= 10)
+        {
+            return "BottomRight";
+        }
+
+        return null;
+    }
+
+    public override void Move(Vector delta)
+    {
+        Bounds = new Rect(Bounds.TopLeft + delta, Bounds.BottomRight + delta);
+    }
+
+    public override void MoveHandle(string handle, Point point, bool constrainToSquare)
+    {
+        var normalized = Normalize(Bounds);
+        var oppositeCorner = handle switch
+        {
+            "TopLeft" => normalized.BottomRight,
+            "BottomRight" => normalized.TopLeft,
+            _ => normalized.BottomRight,
+        };
+
+        Bounds = handle switch
+        {
+            "TopLeft" => CreateRectFromPoints(oppositeCorner, point, constrainToSquare),
+            "BottomRight" => CreateRectFromPoints(oppositeCorner, point, constrainToSquare),
+            _ => Bounds,
+        };
+    }
+
+    public override void UpdateFromAnchor(Point anchor, Point current, bool constrainToSquare)
+    {
+        Bounds = CreateRectFromPoints(anchor, current, constrainToSquare);
+    }
+
+    public override void SetColor(Color color)
+    {
+        OverlayColor = color;
+    }
+
+    public void SetBlurLevel(double blurLevel)
+    {
+        BlurLevel = Math.Clamp(blurLevel, 0, 1);
+    }
+
+    public void SetPixelationLevel(double pixelationLevel)
+    {
+        PixelationLevel = Math.Clamp(pixelationLevel, 0, 1);
+    }
+
+    public override AnnotationBase Clone()
+    {
+        var clone = new ObscureAnnotation
+        {
+            Bounds = Bounds,
+        };
+        clone.SetColor(OverlayColor);
+        clone.SetBlurLevel(BlurLevel);
+        clone.SetPixelationLevel(PixelationLevel);
+        return clone;
+    }
+
+    private Grid CreateSurface(EditorWindow? editorWindow, Rect normalized, bool isSelected, bool isHovered)
+    {
+        var grid = new Grid
+        {
+            Width = normalized.Width,
+            Height = normalized.Height,
+            Clip = new RectangleGeometry(new Rect(0, 0, normalized.Width, normalized.Height), CornerRadius, CornerRadius),
+            IsHitTestVisible = false,
+        };
+
+        if (editorWindow?.CreatePixelatedObscureSource(normalized, PixelationLevel) is BitmapSource obscuredSource)
+        {
+            var obscuredImage = new Image
+            {
+                Width = normalized.Width,
+                Height = normalized.Height,
+                Stretch = Stretch.Fill,
+                Source = obscuredSource,
+                IsHitTestVisible = false,
+            };
+            RenderOptions.SetBitmapScalingMode(
+                obscuredImage,
+                PixelationLevel > 0.01 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);
+
+            if (BlurLevel > 0)
+            {
+                obscuredImage.Effect = new BlurEffect
+                {
+                    Radius = BaseBlurRadius + (BlurLevel * MaxAdditionalBlurRadius),
+                    RenderingBias = RenderingBias.Quality,
+                };
+            }
+
+            grid.Children.Add(obscuredImage);
+        }
+        else
+        {
+            var fallbackOverlay = new Rectangle
+            {
+                Width = normalized.Width,
+                Height = normalized.Height,
+                RadiusX = CornerRadius,
+                RadiusY = CornerRadius,
+                Fill = MakeBrush(WithAlpha(OverlayColor, 96)),
+                IsHitTestVisible = false,
+            };
+            grid.Children.Add(fallbackOverlay);
+        }
+
+        var tint = new Rectangle
+        {
+            Width = normalized.Width,
+            Height = normalized.Height,
+            RadiusX = CornerRadius,
+            RadiusY = CornerRadius,
+            Fill = MakeBrush(GetTintColor(isHovered)),
+            IsHitTestVisible = false,
+        };
+        grid.Children.Add(tint);
+
+        var frame = new Rectangle
+        {
+            Width = normalized.Width,
+            Height = normalized.Height,
+            RadiusX = CornerRadius,
+            RadiusY = CornerRadius,
+            Stroke = MakeBrush(GetFrameColor(isHovered)),
+            StrokeThickness = isSelected ? 3 : 2,
+            Fill = Brushes.Transparent,
+            IsHitTestVisible = false,
+        };
+
+        grid.Children.Add(frame);
+        return grid;
+    }
+
+    private Color GetTintColor(bool isHovered)
+    {
+        var activeLevel = Math.Max(BlurLevel, PixelationLevel);
+        var alpha = (byte)Math.Clamp(Math.Round(18 + (activeLevel * 34) + (isHovered ? 8 : 0)), 0, 255);
+        return WithAlpha(OverlayColor, alpha);
+    }
+
+    private Color GetFrameColor(bool isHovered)
+    {
+        return isHovered
+            ? Darken(OverlayColor, 0.12)
+            : WithAlpha(Darken(OverlayColor, 0.24), 230);
+    }
+
+    private static Rect Normalize(Rect rect)
+    {
+        return new Rect(rect.TopLeft, rect.BottomRight);
+    }
+}
+
 internal sealed class ArrowAnnotation : AnnotationBase
 {
-    private static readonly Pen ArrowHitTestPen = CreateArrowHitTestPen();
+    private const double DefaultShaftThickness = 8;
+    private const double DefaultHeadLength = 28;
+    private const double DefaultHeadWidth = 22;
+    private const double MinShaftThickness = 4;
+    private const double MaxShaftThickness = 40;
+    private const double MinHeadLength = 12;
+    private const double MaxHeadLength = 128;
+    private const double MinHeadWidth = 8;
+    private const double MaxHeadWidth = 96;
+    private const double DefaultOuterEdgeWidth = 32;
+    private const double DefaultInnerEdgeWidth = 7;
+    private const double DefaultTailSweep = 42;
+    private const double DefaultHeadSkew = 0;
+    private const double MinEdgeWidth = 2;
+    private const double MaxEdgeWidth = 150;
+    private const double MinTailSweep = -150;
+    private const double MaxTailSweep = 180;
+    private const double MinHeadSkew = -110;
+    private const double MaxHeadSkew = 110;
 
     public Point Start { get; set; }
 
-    public Point Control1 { get; set; }
-
-    public Point Control2 { get; set; }
-
     public Point End { get; set; }
+
+    public List<Point> BendPoints { get; } = new();
 
     public Color StrokeColor { get; private set; } = EditorWindow.DefaultArrowColor;
 
-    public bool Control1IsSharp { get; private set; }
+    public ArrowStyle Style { get; private set; } = ArrowStyle.BrushStroke;
 
-    public bool Control2IsSharp { get; private set; }
+    public double ShaftThickness { get; private set; } = DefaultShaftThickness;
+
+    public double HeadLength { get; private set; } = DefaultHeadLength;
+
+    public double HeadWidth { get; private set; } = DefaultHeadWidth;
+
+    public double OuterEdgeWidth { get; private set; } = DefaultOuterEdgeWidth;
+
+    public double InnerEdgeWidth { get; private set; } = DefaultInnerEdgeWidth;
+
+    public double TailSweep { get; private set; } = DefaultTailSweep;
+
+    public double HeadSkew { get; private set; } = DefaultHeadSkew;
+
+    public double TailScale { get; private set; } = 1.0;
+
+    public double BodyScale { get; private set; } = 1.0;
+
+    public double FrontScale { get; private set; } = 1.0;
+
+    public double HeadScale { get; private set; } = 1.0;
+
+    public void SetTailScale(double value) => TailScale = Math.Clamp(value, 0.15, 3.0);
+
+    public void SetBodyScale(double value) => BodyScale = Math.Clamp(value, 0.15, 3.0);
+
+    public void SetFrontScale(double value) => FrontScale = Math.Clamp(value, 0.15, 3.0);
+
+    public void SetHeadScale(double value) => HeadScale = Math.Clamp(value, 0.2, 1.6);
 
     public static ArrowAnnotation Create(Point point)
     {
         return new ArrowAnnotation
         {
             Start = point,
-            Control1 = new Point(point.X + 26, point.Y),
-            Control2 = new Point(point.X + 54, point.Y),
             End = new Point(point.X + 80, point.Y),
         };
     }
 
+    public void AddBendPointAt(Point clickPoint)
+    {
+        var anchors = BuildAnchors(End);
+        var bestIndex = 0;
+        var bestDist = double.MaxValue;
+        for (var i = 0; i < anchors.Count - 1; i++)
+        {
+            var d = DistanceToSegment(anchors[i], anchors[i + 1], clickPoint);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                bestIndex = i;
+            }
+        }
+        BendPoints.Insert(bestIndex, clickPoint);
+    }
+
+    public void RemoveBendPointAt(int index)
+    {
+        if (index >= 0 && index < BendPoints.Count)
+        {
+            BendPoints.RemoveAt(index);
+        }
+    }
+
+    private List<Point> BuildAnchors(Point endPoint)
+    {
+        var anchors = new List<Point>(BendPoints.Count + 2) { Start };
+        anchors.AddRange(BendPoints);
+        anchors.Add(endPoint);
+        return anchors;
+    }
+
+    private static double DistanceToSegment(Point a, Point b, Point p)
+    {
+        var abx = b.X - a.X;
+        var aby = b.Y - a.Y;
+        var len2 = (abx * abx) + (aby * aby);
+        if (len2 < 0.0001)
+        {
+            return (p - a).Length;
+        }
+        var t = Math.Clamp((((p.X - a.X) * abx) + ((p.Y - a.Y) * aby)) / len2, 0, 1);
+        var proj = new Point(a.X + (abx * t), a.Y + (aby * t));
+        return (p - proj).Length;
+    }
+
     public override void Render(Canvas canvas, bool isSelected, bool isHovered)
     {
-        var geometry = CreatePathGeometry(trimmedForArrowHead: true);
-        var strokeColor = MakeBrush(isHovered ? Darken(StrokeColor, 0.18) : StrokeColor);
-
-        var path = new ShapePath
-        {
-            Data = geometry,
-            Stroke = strokeColor,
-            StrokeThickness = isSelected ? 7 : 6,
-            StrokeStartLineCap = PenLineCap.Round,
-            StrokeEndLineCap = PenLineCap.Round,
-            StrokeLineJoin = PenLineJoin.Round,
-        };
-        canvas.Children.Add(path);
+        var strokeColor = isHovered ? Darken(StrokeColor, 0.18) : StrokeColor;
+        var selectionGeometry = CreateExplicitArrowGeometry();
+        RenderBrush(canvas, strokeColor, isSelected);
 
         if (isSelected)
         {
-            AddMarchingAntsPath(canvas, geometry);
-        }
-
-        var arrowHead = CreateArrowHead(strokeColor);
-        canvas.Children.Add(arrowHead);
-
-        if (isSelected)
-        {
+            AddMarchingAntsPath(canvas, selectionGeometry);
             AddHandle(canvas, Start);
-            AddHandle(canvas, Control1);
-            AddHandle(canvas, Control2);
+            for (var i = 0; i < BendPoints.Count; i++)
+            {
+                AddHandle(canvas, BendPoints[i]);
+            }
             AddHandle(canvas, End);
         }
     }
 
+    private static void AddBezierHandleLine(Canvas canvas, Point from, Point to)
+    {
+        var line = new System.Windows.Shapes.Line
+        {
+            X1 = from.X,
+            Y1 = from.Y,
+            X2 = to.X,
+            Y2 = to.Y,
+            Stroke = Brushes.DodgerBlue,
+            StrokeThickness = 1,
+            StrokeDashArray = new DoubleCollection { 4, 3 },
+            IsHitTestVisible = false,
+        };
+        canvas.Children.Add(line);
+    }
+
     public override bool HitTest(Point point)
     {
-        return CreatePathGeometry().StrokeContains(ArrowHitTestPen, point);
+        var hitPen = new Pen(Brushes.Black, Math.Max(16, GetResolvedShaftThickness() + 12));
+        var explicitGeometry = CreateExplicitArrowGeometry();
+        return explicitGeometry.FillContains(point)
+            || explicitGeometry.StrokeContains(new Pen(Brushes.Black, 14), point)
+            || CreatePathGeometry(trimmedForArrowHead: true).StrokeContains(hitPen, point);
     }
 
     public override string? HitHandle(Point point)
     {
-        if (Distance(Start, point) <= 10)
+        if (Distance(Start, point) <= 14)
         {
             return "Start";
         }
 
-		if (Distance(Control1, point) <= 14)
+        for (var i = 0; i < BendPoints.Count; i++)
         {
-            return "Control1";
+            if (Distance(BendPoints[i], point) <= 14)
+            {
+                return "Bend:" + i;
+            }
         }
 
-		if (Distance(Control2, point) <= 14)
-        {
-            return "Control2";
-        }
-
-        if (Distance(End, point) <= 10)
+        if (Distance(End, point) <= 14)
         {
             return "End";
         }
@@ -2769,9 +3512,11 @@ internal sealed class ArrowAnnotation : AnnotationBase
     public override void Move(Vector delta)
     {
         Start += delta;
-        Control1 += delta;
-        Control2 += delta;
         End += delta;
+        for (var i = 0; i < BendPoints.Count; i++)
+        {
+            BendPoints[i] = BendPoints[i] + delta;
+        }
     }
 
     public override void MoveHandle(string handle, Point point, bool constrainToSquare)
@@ -2781,14 +3526,16 @@ internal sealed class ArrowAnnotation : AnnotationBase
             case "Start":
                 Start = point;
                 break;
-            case "Control1":
-                Control1 = point;
-                break;
-            case "Control2":
-                Control2 = point;
-                break;
             case "End":
                 End = point;
+                break;
+            default:
+                if (handle.StartsWith("Bend:", StringComparison.Ordinal)
+                    && int.TryParse(handle.AsSpan(5), out var idx)
+                    && idx >= 0 && idx < BendPoints.Count)
+                {
+                    BendPoints[idx] = point;
+                }
                 break;
         }
     }
@@ -2797,11 +3544,17 @@ internal sealed class ArrowAnnotation : AnnotationBase
     {
         Start = anchor;
         End = current;
+        BendPoints.Clear();
         var delta = current - anchor;
-        Control1 = new Point(anchor.X + (delta.X / 3), anchor.Y + (delta.Y / 3));
-        Control2 = new Point(anchor.X + ((delta.X * 2) / 3), anchor.Y + ((delta.Y * 2) / 3));
-        Control1IsSharp = false;
-        Control2IsSharp = false;
+
+        var length = Math.Max(1, delta.Length);
+        ShaftThickness = Math.Clamp(length * 0.11, MinShaftThickness, 24);
+        HeadLength = Math.Clamp(length * 0.32, 22, 68);
+        HeadWidth = Math.Clamp(length * 0.22, 16, 54);
+        OuterEdgeWidth = Math.Clamp(length * 0.34, 18, 86);
+        InnerEdgeWidth = Math.Clamp(length * 0.08, 3, 22);
+        TailSweep = Math.Clamp(length * 0.36, MinTailSweep, MaxTailSweep);
+        HeadSkew = 0;
     }
 
     public override void SetColor(Color color)
@@ -2809,81 +3562,691 @@ internal sealed class ArrowAnnotation : AnnotationBase
         StrokeColor = color;
     }
 
+    public void SetStyle(ArrowStyle arrowStyle)
+    {
+        Style = ArrowStyle.BrushStroke;
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new ArrowAnnotation
         {
             Start = Start,
-            Control1 = Control1,
-            Control2 = Control2,
             End = End,
+            ShaftThickness = ShaftThickness,
+            HeadLength = HeadLength,
+            HeadWidth = HeadWidth,
+            OuterEdgeWidth = OuterEdgeWidth,
+            InnerEdgeWidth = InnerEdgeWidth,
+            TailSweep = TailSweep,
+            HeadSkew = HeadSkew,
+            TailScale = TailScale,
+            BodyScale = BodyScale,
+            FrontScale = FrontScale,
+            HeadScale = HeadScale,
         };
+        clone.BendPoints.AddRange(BendPoints);
         clone.SetColor(StrokeColor);
-        if (Control1IsSharp)
-        {
-            clone.ToggleCornerStyle("Control1");
-        }
-
-        if (Control2IsSharp)
-        {
-            clone.ToggleCornerStyle("Control2");
-        }
-
+        clone.SetStyle(Style);
         return clone;
     }
 
-    public void ToggleCornerStyle(string handle)
+    private void RenderClassic(Canvas canvas, PathGeometry geometry, Color strokeColor, bool isSelected)
     {
-        switch (handle)
-        {
-            case "Control1":
-                Control1IsSharp = !Control1IsSharp;
-                break;
-            case "Control2":
-                Control2IsSharp = !Control2IsSharp;
-                break;
-        }
+        var shaftThickness = GetResolvedShaftThickness();
+        var headLength = GetResolvedHeadLength();
+        var headWidth = GetResolvedHeadWidth();
+        var strokeBrush = MakeBrush(strokeColor);
+        canvas.Children.Add(CreateShaftPath(geometry, strokeBrush, isSelected ? shaftThickness + 1 : shaftThickness));
+        canvas.Children.Add(CreateFilledArrowHead(strokeBrush, headLength, headWidth));
     }
 
-    private Polygon CreateArrowHead(Brush fillBrush)
+    private void RenderHanddrawn(Canvas canvas, PathGeometry geometry, Color strokeColor, bool isSelected)
     {
-        var direction = GetArrowHeadDirection();
-        if (direction.Length < 0.001)
+        var points = GetSampledCenterlinePoints(trimmedForArrowHead: true, sampleCount: 28);
+        if (points.Count < 2)
         {
-            direction = End - Start;
+            RenderClassic(canvas, geometry, strokeColor, isSelected);
+            return;
         }
 
-        direction.Normalize();
-        var normal = new Vector(-direction.Y, direction.X);
+        var shaftThickness = GetResolvedShaftThickness();
+        var baseThickness = Math.Max(2.8, (shaftThickness * 0.72) + (isSelected ? 0.9 : 0));
+        canvas.Children.Add(CreateSketchStroke(points, strokeColor, baseThickness, jitterSeed: 0.65, offsetScale: 4.8 + (shaftThickness * 0.4)));
+        canvas.Children.Add(CreateSketchStroke(points, WithAlpha(strokeColor, 205), Math.Max(1.2, baseThickness - 1.6), jitterSeed: 1.95, offsetScale: 7.2 + (shaftThickness * 0.45)));
+        canvas.Children.Add(CreateSketchStroke(points, WithAlpha(Darken(strokeColor, 0.08), 155), Math.Max(1, shaftThickness * 0.2), jitterSeed: 3.2, offsetScale: 9.8 + (shaftThickness * 0.5), dashArray: [1.2, 3.1]));
+        canvas.Children.Add(CreateHanddrawnTail(strokeColor, offset: -(shaftThickness * 0.9), thickness: Math.Max(1.4, shaftThickness * 0.3), length: 18 + (shaftThickness * 1.8)));
+        canvas.Children.Add(CreateHanddrawnTail(strokeColor, offset: shaftThickness * 0.52, thickness: Math.Max(1.1, shaftThickness * 0.2), length: 14 + (shaftThickness * 1.1)));
+        canvas.Children.Add(CreateHanddrawnHead(strokeColor, Math.Max(2.2, baseThickness * 0.72), GetResolvedHeadLength() * 1.04, GetResolvedHeadWidth() * 1.08));
+    }
+
+    private void RenderBrush(Canvas canvas, Color strokeColor, bool isSelected)
+    {
+        var ribbon = new ShapePath
+        {
+            Data = CreateExplicitArrowGeometry(),
+            Fill = MakeBrush(strokeColor),
+            IsHitTestVisible = false,
+        };
+        canvas.Children.Add(ribbon);
+    }
+
+    private PathGeometry CreateExplicitArrowGeometry()
+    {
+        // Classic block arrow: shaft (parallel sides) + triangular arrowhead with notched base.
+        // Outline traversal:
+        //   tailLeft -> ... centerline left edge ... -> shaftLeftBase
+        //        -> headLeftBarb -> tip -> headRightBarb -> shaftRightBase
+        //        -> ... centerline right edge (reversed) ... -> tailRight -> close
+        //
+        // Sizing is proportional to total length so the head is always visible relative to the shaft.
+
+        var totalLength = Math.Max(1.0, GetApproximateLength());
+
+        // Resolve dimensions, but enforce sane proportions vs. arrow length so the head reads as an arrow.
+        var maxShaft = Math.Max(6, totalLength * 0.18);
+        var shaftThickness = Math.Clamp(GetResolvedShaftThickness(), 6, maxShaft);
+        var minHead = shaftThickness * 2.2 * HeadScale;
+        var maxHead = Math.Max(minHead, totalLength * 0.45);
+        var headLength = Math.Clamp(GetResolvedHeadLength() * HeadScale, minHead, maxHead);
+        var minHeadWidth = shaftThickness * 2.4 * HeadScale;
+        var maxHeadWidth = Math.Max(minHeadWidth, totalLength * 0.45);
+        var headWidth = Math.Clamp(GetResolvedHeadWidth() * HeadScale, minHeadWidth, maxHeadWidth);
+        // Make sure the head is always at least as wide as the shaft + visible barbs.
+        headWidth = Math.Max(headWidth, (shaftThickness + 14) * HeadScale);
+
+        // Sample the centerline and trim it so the shaft stops where the arrowhead begins.
+        var fullCenterline = GetSampledCenterlinePoints(trimmedForArrowHead: false, sampleCount: 64);
+        if (fullCenterline.Count < 2)
+        {
+            fullCenterline = new List<Point> { Start, End };
+        }
+
+        var trimmedCenterline = TrimPolylineFromEnd(fullCenterline, headLength);
+        if (trimmedCenterline.Count < 2)
+        {
+            trimmedCenterline = new List<Point> { Start, End };
+        }
+
+        // Final tangent at the tip.
+        var endDir = trimmedCenterline[^1] - (trimmedCenterline.Count >= 2 ? trimmedCenterline[^2] : trimmedCenterline[0]);
+        if (endDir.Length < 0.001) endDir = End - Start;
+        if (endDir.Length < 0.001) endDir = new Vector(1, 0);
+        endDir.Normalize();
+        var endNormal = new Vector(-endDir.Y, endDir.X);
+
+        var shaftBaseCenter = trimmedCenterline[^1];
         var tip = End;
-        var basePoint = End - (direction * 20);
-        var polygon = new Polygon
+
+        // Build left/right edges of the shaft along the centerline.
+        // Width varies along the shaft using TailScale (t=0), BodyScale (t=0.5), and 1.0 at the head base (t=1)
+        // via a quadratic Bezier blend so the transitions are smooth.
+        var leftEdge = new List<Point>(trimmedCenterline.Count);
+        var rightEdge = new List<Point>(trimmedCenterline.Count);
+        var halfShaftBase = shaftThickness / 2.0;
+        var count = trimmedCenterline.Count;
+        for (var i = 0; i < count; i++)
+        {
+            var t = count > 1 ? i / (double)(count - 1) : 0;
+            var scale = ShaftScaleAt(t, TailScale, BodyScale, FrontScale);
+            var halfShaft = halfShaftBase * scale;
+            var n = GetPolylineNormal(trimmedCenterline, i);
+            leftEdge.Add(trimmedCenterline[i] + (n * halfShaft));
+            rightEdge.Add(trimmedCenterline[i] - (n * halfShaft));
+        }
+
+        var shaftLeftBase = shaftBaseCenter + (endNormal * halfShaftBase * FrontScale);
+        var shaftRightBase = shaftBaseCenter - (endNormal * halfShaftBase * FrontScale);
+        var headLeftBarb = shaftBaseCenter + (endNormal * (headWidth / 2.0));
+        var headRightBarb = shaftBaseCenter - (endNormal * (headWidth / 2.0));
+
+        var figure = new PathFigure
+        {
+            StartPoint = leftEdge[0],
+            IsClosed = true,
+            IsFilled = true,
+            Segments = new PathSegmentCollection(),
+        };
+
+        for (var i = 1; i < leftEdge.Count; i++)
+        {
+            figure.Segments.Add(new LineSegment(leftEdge[i], true));
+        }
+
+        // Replace the last left point with the precise shaftLeftBase to avoid micro-misalignment with the head.
+        figure.Segments.Add(new LineSegment(shaftLeftBase, true));
+        figure.Segments.Add(new LineSegment(headLeftBarb, true));
+        figure.Segments.Add(new LineSegment(tip, true));
+        figure.Segments.Add(new LineSegment(headRightBarb, true));
+        figure.Segments.Add(new LineSegment(shaftRightBase, true));
+
+        for (var i = rightEdge.Count - 1; i >= 0; i--)
+        {
+            figure.Segments.Add(new LineSegment(rightEdge[i], true));
+        }
+
+        return new PathGeometry([figure]) { FillRule = FillRule.Nonzero };
+    }
+
+    private static double ShaftScaleAt(double t, double tail, double body, double front)
+    {
+        // Quadratic Bezier scalar blend: tail (t=0) -> body (t=0.5) -> front (t=1, head base).
+        var u = 1 - t;
+        return (u * u * tail) + (2 * u * t * body) + (t * t * front);
+    }
+
+    private static List<Point> TrimPolylineFromEnd(IReadOnlyList<Point> points, double trimLength)
+    {
+        if (points.Count < 2 || trimLength <= 0)
+        {
+            return points.ToList();
+        }
+
+        // Compute total length and walk back from the end until trimLength is consumed.
+        double remaining = trimLength;
+        var lastIndex = points.Count - 1;
+        var endPoint = points[lastIndex];
+
+        for (var i = lastIndex; i > 0; i--)
+        {
+            var seg = points[i] - points[i - 1];
+            var segLen = seg.Length;
+            if (segLen >= remaining)
+            {
+                seg.Normalize();
+                var cut = points[i] - (seg * remaining);
+                var trimmed = new List<Point>(i + 1);
+                for (var k = 0; k < i; k++)
+                {
+                    trimmed.Add(points[k]);
+                }
+                trimmed.Add(cut);
+                return trimmed;
+            }
+            remaining -= segLen;
+        }
+
+        // Trim length exceeds total polyline; return a single short segment near the start.
+        var dir = points[1] - points[0];
+        if (dir.Length < 0.001) dir = new Vector(1, 0);
+        dir.Normalize();
+        return new List<Point> { points[0], points[0] + (dir * 1.0) };
+    }
+
+    private ShapePath CreateShaftPath(PathGeometry geometry, Brush strokeBrush, double thickness)
+    {
+        return new ShapePath
+        {
+            Data = geometry,
+            Stroke = strokeBrush,
+            StrokeThickness = thickness,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+        };
+    }
+
+    private Polygon CreateFilledArrowHead(Brush fillBrush, double headLength, double headWidth)
+    {
+        var frame = GetArrowHeadFrame(headLength, headWidth);
+        return new Polygon
         {
             Fill = fillBrush,
             Points =
             {
-                tip,
-                basePoint + (normal * 8),
-                basePoint - (normal * 8),
+                frame.Tip,
+                frame.LeftBase,
+                frame.RightBase,
+            },
+            IsHitTestVisible = false,
+        };
+    }
+
+    private Geometry CreateArrowHeadGeometry(double headLength, double headWidth)
+    {
+        var frame = GetArrowHeadFrame(headLength, headWidth);
+        var figure = new PathFigure
+        {
+            StartPoint = frame.Tip,
+            IsClosed = true,
+            IsFilled = true,
+            Segments =
+            {
+                new LineSegment(frame.LeftBase, true),
+                new LineSegment(frame.RightBase, true),
             },
         };
+        return new PathGeometry([figure]);
+    }
 
-        return polygon;
+    private ShapePath CreateOffsetStroke(IReadOnlyList<Point> points, double offset, Brush strokeBrush, double thickness)
+    {
+        return new ShapePath
+        {
+            Data = CreateOffsetPathGeometry(points, offset),
+            Stroke = strokeBrush,
+            StrokeThickness = thickness,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            IsHitTestVisible = false,
+        };
+    }
+
+    private ShapePath CreateSketchStroke(IReadOnlyList<Point> points, Color strokeColor, double thickness, double jitterSeed, double offsetScale, DoubleCollection? dashArray = null)
+    {
+        var path = new ShapePath
+        {
+            Data = CreateSketchedPathGeometry(points, jitterSeed, offsetScale),
+            Stroke = MakeBrush(strokeColor),
+            StrokeThickness = thickness,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            IsHitTestVisible = false,
+        };
+
+        if (dashArray is not null)
+        {
+            path.StrokeDashArray = dashArray;
+        }
+
+        return path;
+    }
+
+    private Line CreateBrushTail(Color strokeColor, double offset, double thickness, double length)
+    {
+        var direction = GetStartDirection();
+        var normal = new Vector(-direction.Y, direction.X);
+        var tailStart = Start - (direction * length) + (normal * (offset + GetResolvedTailSweep()));
+        var tailEnd = Start + (direction * (6 + (ShaftThickness * 0.3))) + (normal * (offset * 0.45));
+        return new Line
+        {
+            X1 = tailStart.X,
+            Y1 = tailStart.Y,
+            X2 = tailEnd.X,
+            Y2 = tailEnd.Y,
+            Stroke = MakeBrush(WithAlpha(strokeColor, 150)),
+            StrokeThickness = thickness,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            IsHitTestVisible = false,
+        };
+    }
+
+    private Line CreateHanddrawnTail(Color strokeColor, double offset, double thickness, double length)
+    {
+        var direction = GetStartDirection();
+        var normal = new Vector(-direction.Y, direction.X);
+        var tailStart = Start - (direction * length) + (normal * offset);
+        var tailEnd = Start + (normal * (offset * 0.28));
+        return new Line
+        {
+            X1 = tailStart.X,
+            Y1 = tailStart.Y,
+            X2 = tailEnd.X,
+            Y2 = tailEnd.Y,
+            Stroke = MakeBrush(WithAlpha(strokeColor, 180)),
+            StrokeThickness = thickness,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            IsHitTestVisible = false,
+        };
+    }
+
+    private ShapePath CreateHanddrawnHead(Color strokeColor, double thickness, double headLength, double headWidth)
+    {
+        var frame = GetArrowHeadFrame(headLength, headWidth);
+        var leftMid = frame.Tip - (frame.Direction * (headLength * 0.42)) + (frame.Normal * (headWidth * 0.16));
+        var rightMid = frame.Tip - (frame.Direction * (headLength * 0.34)) - (frame.Normal * (headWidth * 0.08));
+
+        var leftFigure = new PathFigure
+        {
+            StartPoint = frame.LeftBase,
+            IsClosed = false,
+            IsFilled = false,
+            Segments = { new LineSegment(frame.Tip, true), new LineSegment(leftMid, true) },
+        };
+        var rightFigure = new PathFigure
+        {
+            StartPoint = frame.RightBase + (frame.Direction * (headLength * 0.18)),
+            IsClosed = false,
+            IsFilled = false,
+            Segments = { new LineSegment(frame.Tip, true), new LineSegment(rightMid, true) },
+        };
+
+        return new ShapePath
+        {
+            Data = new PathGeometry([leftFigure, rightFigure]),
+            Stroke = MakeBrush(strokeColor),
+            StrokeThickness = thickness,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            IsHitTestVisible = false,
+        };
+    }
+
+    private Polygon CreateBrushArrowHead(Color strokeColor, double headLength, double headWidth)
+    {
+        var frame = GetArrowHeadFrame(headLength, headWidth);
+        var upperShoulder = frame.LeftBase + (frame.Direction * (headLength * 0.02));
+        var innerNotch = frame.Tip - (frame.Direction * (headLength * 0.42)) + (frame.Normal * (headWidth * 0.04));
+        var lowerShoulder = frame.RightBase + (frame.Direction * (headLength * 0.28));
+        var belly = frame.BaseCenter - (frame.Normal * (headWidth * 0.34));
+        return new Polygon
+        {
+            Fill = MakeBrush(strokeColor),
+            Points =
+            {
+                frame.Tip,
+                upperShoulder,
+                innerNotch,
+                lowerShoulder,
+                belly,
+            },
+            IsHitTestVisible = false,
+        };
+    }
+
+    private Ellipse CreateBrushStartCap(Color strokeColor, double shaftThickness)
+    {
+        var normal = GetPolylineNormal(GetFlattenedPoints(CreatePathGeometry()), 0);
+        var width = Math.Max(12, shaftThickness * 1.85);
+        var height = Math.Max(8, shaftThickness * 1.1);
+        var ellipse = new Ellipse
+        {
+            Width = width,
+            Height = height,
+            Fill = MakeBrush(WithAlpha(strokeColor, 210)),
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(ellipse, Start.X - (width / 2) + (normal.X * 1.4));
+        Canvas.SetTop(ellipse, Start.Y - (height / 2) + (normal.Y * 1.4));
+        return ellipse;
+    }
+
+    private PathGeometry CreateRibbonGeometry(IReadOnlyList<Point> points, double shaftThickness, bool useAsymmetricEdges = false)
+    {
+        var leftEdge = new List<Point>(points.Count);
+        var rightEdge = new List<Point>(points.Count);
+        var outerWidth = useAsymmetricEdges ? GetResolvedOuterEdgeWidth() : shaftThickness * 0.72;
+        var innerWidth = useAsymmetricEdges ? GetResolvedInnerEdgeWidth() : shaftThickness * 0.58;
+
+        for (var index = 0; index < points.Count; index++)
+        {
+            var normal = GetPolylineNormal(points, index);
+            var edgeWidths = GetBrushEdgeWidths(index, points.Count, shaftThickness, outerWidth, innerWidth);
+            leftEdge.Add(points[index] + (normal * edgeWidths.Outer));
+            rightEdge.Add(points[index] - (normal * edgeWidths.Inner));
+        }
+
+        var figure = new PathFigure
+        {
+            StartPoint = leftEdge[0],
+            IsClosed = true,
+            IsFilled = true,
+        };
+
+        for (var index = 1; index < leftEdge.Count; index++)
+        {
+            figure.Segments.Add(new LineSegment(leftEdge[index], true));
+        }
+
+        for (var index = rightEdge.Count - 1; index >= 0; index--)
+        {
+            figure.Segments.Add(new LineSegment(rightEdge[index], true));
+        }
+
+        return new PathGeometry([figure]);
+    }
+
+    private List<Point> GetSampledCenterlinePoints(bool trimmedForArrowHead, int sampleCount)
+    {
+        var endPoint = trimmedForArrowHead ? GetArrowShaftEnd() : End;
+        var anchors = BuildAnchors(endPoint);
+
+        if (anchors.Count == 2)
+        {
+            var count = Math.Max(2, sampleCount);
+            var line = new List<Point>(count);
+            for (var i = 0; i < count; i++)
+            {
+                var t = i / (double)(count - 1);
+                line.Add(new Point(
+                    anchors[0].X + ((anchors[1].X - anchors[0].X) * t),
+                    anchors[0].Y + ((anchors[1].Y - anchors[0].Y) * t)));
+            }
+            return line;
+        }
+
+        // Catmull-Rom spline through anchors (tension 0.5).
+        var segments = anchors.Count - 1;
+        var perSegment = Math.Max(8, sampleCount / segments);
+        var points = new List<Point>((perSegment * segments) + 1) { anchors[0] };
+        for (var s = 0; s < segments; s++)
+        {
+            var p0 = s == 0 ? anchors[0] : anchors[s - 1];
+            var p1 = anchors[s];
+            var p2 = anchors[s + 1];
+            var p3 = s + 2 >= anchors.Count ? anchors[^1] : anchors[s + 2];
+            for (var i = 1; i <= perSegment; i++)
+            {
+                var t = i / (double)perSegment;
+                var t2 = t * t;
+                var t3 = t2 * t;
+                var x = 0.5 * ((2 * p1.X)
+                    + ((-p0.X + p2.X) * t)
+                    + ((((2 * p0.X) - (5 * p1.X) + (4 * p2.X)) - p3.X) * t2)
+                    + (((-p0.X + (3 * p1.X)) - (3 * p2.X) + p3.X) * t3));
+                var y = 0.5 * ((2 * p1.Y)
+                    + ((-p0.Y + p2.Y) * t)
+                    + ((((2 * p0.Y) - (5 * p1.Y) + (4 * p2.Y)) - p3.Y) * t2)
+                    + (((-p0.Y + (3 * p1.Y)) - (3 * p2.Y) + p3.Y) * t3));
+                points.Add(new Point(x, y));
+            }
+        }
+        return points;
+    }
+
+    private List<Point> GetSampledCenterlinePointsLegacy(bool trimmedForArrowHead, int sampleCount)
+    {
+        var flattenedPoints = GetFlattenedPoints(CreatePathGeometry(trimmedForArrowHead));
+        if (flattenedPoints.Count <= 2 || sampleCount <= 2)
+        {
+            return flattenedPoints;
+        }
+
+        var cumulativeLengths = new double[flattenedPoints.Count];
+        for (var index = 1; index < flattenedPoints.Count; index++)
+        {
+            cumulativeLengths[index] = cumulativeLengths[index - 1] + (flattenedPoints[index] - flattenedPoints[index - 1]).Length;
+        }
+
+        var totalLength = cumulativeLengths[^1];
+        if (totalLength < 0.001)
+        {
+            return flattenedPoints;
+        }
+
+        var sampledPoints = new List<Point>(sampleCount);
+        for (var index = 0; index < sampleCount; index++)
+        {
+            var targetLength = totalLength * (index / (double)(sampleCount - 1));
+            sampledPoints.Add(InterpolatePointAtLength(flattenedPoints, cumulativeLengths, targetLength));
+        }
+
+        return sampledPoints;
+    }
+
+    private PathGeometry CreateSketchedPathGeometry(IReadOnlyList<Point> points, double jitterSeed, double offsetScale)
+    {
+        var figure = new PathFigure
+        {
+            StartPoint = JitterPoint(points, 0, jitterSeed, offsetScale),
+            IsClosed = false,
+            IsFilled = false,
+        };
+
+        for (var index = 1; index < points.Count; index++)
+        {
+            figure.Segments.Add(new LineSegment(JitterPoint(points, index, jitterSeed, offsetScale), true));
+        }
+
+        return new PathGeometry([figure]);
+    }
+
+    private PathGeometry CreateOffsetPathGeometry(IReadOnlyList<Point> points, double offset)
+    {
+        var figure = new PathFigure
+        {
+            StartPoint = OffsetPoint(points, 0, offset),
+            IsClosed = false,
+            IsFilled = false,
+        };
+
+        for (var index = 1; index < points.Count; index++)
+        {
+            figure.Segments.Add(new LineSegment(OffsetPoint(points, index, offset), true));
+        }
+
+        return new PathGeometry([figure]);
+    }
+
+    private List<Point> GetFlattenedPoints(PathGeometry geometry)
+    {
+        var flattened = geometry.GetFlattenedPathGeometry();
+        var points = new List<Point>();
+
+        foreach (var figure in flattened.Figures)
+        {
+            AddFlattenedPoint(points, figure.StartPoint);
+            foreach (var segment in figure.Segments.OfType<PolyLineSegment>())
+            {
+                foreach (var point in segment.Points)
+                {
+                    AddFlattenedPoint(points, point);
+                }
+            }
+        }
+
+        return points;
+    }
+
+    private static void AddFlattenedPoint(ICollection<Point> points, Point point)
+    {
+        if (points.Count == 0)
+        {
+            points.Add(point);
+            return;
+        }
+
+        var lastPoint = points.Last();
+        if ((lastPoint - point).Length >= 0.75)
+        {
+            points.Add(point);
+        }
+    }
+
+    private Point OffsetPoint(IReadOnlyList<Point> points, int index, double offset)
+    {
+        return points[index] + (GetPolylineNormal(points, index) * offset);
+    }
+
+    private static Point InterpolatePointAtLength(IReadOnlyList<Point> points, IReadOnlyList<double> cumulativeLengths, double targetLength)
+    {
+        for (var index = 1; index < points.Count; index++)
+        {
+            if (targetLength > cumulativeLengths[index])
+            {
+                continue;
+            }
+
+            var segmentLength = cumulativeLengths[index] - cumulativeLengths[index - 1];
+            if (segmentLength < 0.001)
+            {
+                return points[index];
+            }
+
+            var progress = (targetLength - cumulativeLengths[index - 1]) / segmentLength;
+            return points[index - 1] + ((points[index] - points[index - 1]) * progress);
+        }
+
+        return points[^1];
+    }
+
+    private Point JitterPoint(IReadOnlyList<Point> points, int index, double jitterSeed, double offsetScale)
+    {
+        var progress = points.Count <= 1 ? 0 : index / (double)(points.Count - 1);
+        var normal = GetPolylineNormal(points, index);
+        var tangent = index == 0
+            ? points[Math.Min(1, points.Count - 1)] - points[0]
+            : points[index] - points[index - 1];
+
+        if (tangent.Length < 0.001)
+        {
+            tangent = new Vector(1, 0);
+        }
+
+        tangent.Normalize();
+        var normalWobble = Math.Sin((progress * 8.4) + jitterSeed) * offsetScale;
+        var tangentWobble = Math.Cos((progress * 5.7) + (jitterSeed * 1.7)) * (offsetScale * 0.42);
+        return points[index] + (normal * normalWobble) + (tangent * tangentWobble);
+    }
+
+    private Vector GetPolylineNormal(IReadOnlyList<Point> points, int index)
+    {
+        Vector tangent;
+        if (points.Count < 2)
+        {
+            tangent = End - Start;
+        }
+        else if (index == 0)
+        {
+            tangent = points[1] - points[0];
+        }
+        else if (index == points.Count - 1)
+        {
+            tangent = points[index] - points[index - 1];
+        }
+        else
+        {
+            tangent = points[index + 1] - points[index - 1];
+        }
+
+        if (tangent.Length < 0.001)
+        {
+            tangent = new Vector(1, 0);
+        }
+
+        tangent.Normalize();
+        return new Vector(-tangent.Y, tangent.X);
+    }
+
+    private static (double Outer, double Inner) GetBrushEdgeWidths(int index, int count, double shaftThickness, double outerWidth, double innerWidth)
+    {
+        var progress = count <= 1 ? 1 : index / (double)(count - 1);
+        var tailTaper = 0.08 + (0.92 * Math.Pow(progress, 0.34));
+        var bodySwell = 0.82 + (0.55 * Math.Sin(progress * Math.PI * 0.9));
+        var headTaper = progress > 0.84 ? 1 - (((progress - 0.84) / 0.16) * 0.18) : 1;
+        var outer = Math.Max(shaftThickness * 0.34, outerWidth * tailTaper * bodySwell * headTaper);
+        var inner = Math.Max(shaftThickness * 0.08, innerWidth * (0.42 + (0.58 * tailTaper)) * (0.9 + (0.26 * Math.Sin(progress * Math.PI))) * headTaper);
+        return (outer, inner);
     }
 
     private PathGeometry CreatePathGeometry(bool trimmedForArrowHead = false)
     {
-        var points = new[] { Start, Control1, Control2, trimmedForArrowHead ? GetArrowShaftEnd() : End };
+        var points = GetSampledCenterlinePoints(trimmedForArrowHead, 64);
         var figure = new PathFigure
         {
-            StartPoint = Start,
+            StartPoint = points[0],
             IsFilled = false,
             IsClosed = false,
         };
 
-        foreach (var segment in CreatePathSegments(points))
+        for (var i = 1; i < points.Count; i++)
         {
-            figure.Segments.Add(segment);
+            figure.Segments.Add(new LineSegment(points[i], true));
         }
 
         return new PathGeometry([figure]);
@@ -2893,7 +4256,6 @@ internal sealed class ArrowAnnotation : AnnotationBase
     {
         for (var index = 1; index < points.Length; index++)
         {
-            var start = points[index - 1];
             var end = points[index];
             var hasOutgoingControl = HasSmoothCorner(index - 1);
             var hasIncomingControl = HasSmoothCorner(index);
@@ -2917,12 +4279,7 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
     private bool HasSmoothCorner(int pointIndex)
     {
-        return pointIndex switch
-        {
-            1 => !Control1IsSharp,
-            2 => !Control2IsSharp,
-            _ => false,
-        };
+        return false;
     }
 
     private Point GetOutgoingControlPoint(int pointIndex, Point[] points)
@@ -2997,7 +4354,7 @@ internal sealed class ArrowAnnotation : AnnotationBase
             }
         }
 
-        return previous is { } before && last is { } end ? end - before : End - Control2;
+        return previous is { } before && last is { } end ? end - before : End - Start;
     }
 
     private Point GetArrowShaftEnd()
@@ -3014,17 +4371,262 @@ internal sealed class ArrowAnnotation : AnnotationBase
         }
 
         direction.Normalize();
-        return End - (direction * 18);
+        return End - (direction * Math.Max(10, GetResolvedHeadLength() * 0.74));
     }
 
-    private static Pen CreateArrowHitTestPen()
+    private Vector GetStartDirection()
     {
-        var pen = new Pen(Brushes.Black, 16);
-        if (pen.CanFreeze)
+        var firstAnchor = BendPoints.Count > 0 ? BendPoints[0] : End;
+        var direction = firstAnchor - Start;
+        if (direction.Length < 0.001)
         {
-            pen.Freeze();
+            direction = End - Start;
         }
 
-        return pen;
+        if (direction.Length < 0.001)
+        {
+            direction = new Vector(1, 0);
+        }
+
+        direction.Normalize();
+        return direction;
+    }
+
+    private double GetApproximateLength()
+    {
+        var points = GetFlattenedPoints(CreatePathGeometry());
+        if (points.Count < 2)
+        {
+            return (End - Start).Length;
+        }
+
+        double length = 0;
+        for (var index = 1; index < points.Count; index++)
+        {
+            length += (points[index] - points[index - 1]).Length;
+        }
+
+        return length;
+    }
+
+    private double GetResolvedShaftThickness()
+    {
+        var maxThickness = Math.Max(MinShaftThickness, Math.Min(MaxShaftThickness, GetApproximateLength() * 0.26));
+        return Math.Clamp(ShaftThickness, MinShaftThickness, maxThickness);
+    }
+
+    private double GetResolvedHeadLength()
+    {
+        var maxLength = Math.Max(MinHeadLength, Math.Min(MaxHeadLength, GetApproximateLength() * 0.48));
+        return Math.Clamp(HeadLength, MinHeadLength, maxLength);
+    }
+
+    private double GetResolvedHeadWidth()
+    {
+        var maxWidth = Math.Max(MinHeadWidth, Math.Min(MaxHeadWidth, GetResolvedHeadLength() * 1.85));
+        return Math.Clamp(HeadWidth, MinHeadWidth, maxWidth);
+    }
+
+    private double GetResolvedOuterEdgeWidth()
+    {
+        var maxWidth = Math.Max(MinEdgeWidth, Math.Min(MaxEdgeWidth, GetApproximateLength() * 0.95));
+        return Math.Clamp(OuterEdgeWidth, MinEdgeWidth, maxWidth);
+    }
+
+    private double GetResolvedInnerEdgeWidth()
+    {
+        var maxWidth = Math.Max(MinEdgeWidth, Math.Min(MaxEdgeWidth, GetApproximateLength() * 0.7));
+        return Math.Clamp(InnerEdgeWidth, MinEdgeWidth, maxWidth);
+    }
+
+    private double GetResolvedTailSweep()
+    {
+        var limit = Math.Max(12, Math.Min(MaxTailSweep, GetApproximateLength() * 0.9));
+        return Math.Clamp(TailSweep, -limit, limit);
+    }
+
+    private double GetResolvedHeadSkew()
+    {
+        var limit = Math.Max(8, Math.Min(MaxHeadSkew, GetResolvedHeadWidth() * 1.6));
+        return Math.Clamp(HeadSkew, -limit, limit);
+    }
+
+    private (Point Tip, Point BaseCenter, Point LeftBase, Point RightBase, Vector Direction, Vector Normal) GetArrowHeadFrame(double headLength, double headWidth)
+    {
+        var direction = GetArrowHeadDirection();
+        if (direction.Length < 0.001)
+        {
+            direction = End - Start;
+        }
+
+        if (direction.Length < 0.001)
+        {
+            direction = new Vector(1, 0);
+        }
+
+        direction.Normalize();
+        var normal = new Vector(-direction.Y, direction.X);
+        var baseCenter = End - (direction * headLength) + (normal * GetResolvedHeadSkew());
+        return (
+            Tip: End,
+            BaseCenter: baseCenter,
+            LeftBase: baseCenter + (normal * headWidth),
+            RightBase: baseCenter - (normal * headWidth),
+            Direction: direction,
+            Normal: normal);
+    }
+
+    private Point GetThicknessHandlePoint()
+    {
+        GetThicknessHandleFrame(out var center, out var normal);
+        return center + (normal * (GetResolvedShaftThickness() * 0.5));
+    }
+
+    private void GetThicknessHandleFrame(out Point center, out Vector normal)
+    {
+        var points = GetSampledCenterlinePoints(trimmedForArrowHead: false, sampleCount: 32);
+        if (points.Count < 2)
+        {
+            center = new Point((Start.X + End.X) / 2, (Start.Y + End.Y) / 2);
+            normal = GetFallbackNormal();
+            return;
+        }
+
+        var index = Math.Clamp((int)Math.Round((points.Count - 1) * 0.42), 1, points.Count - 2);
+        center = points[index];
+        normal = GetPolylineNormal(points, index);
+    }
+
+    private Point GetHeadLengthHandlePoint()
+    {
+        var basis = GetArrowHeadBasis(GetResolvedHeadLength());
+        return basis.BaseCenter - (basis.Normal * (GetResolvedHeadWidth() + 14));
+    }
+
+    private Point GetHeadWidthHandlePoint()
+    {
+        var frame = GetArrowHeadFrame(GetResolvedHeadLength(), GetResolvedHeadWidth());
+        return frame.LeftBase;
+    }
+
+    private Point GetOuterEdgeHandlePoint()
+    {
+        GetEdgeHandleFrame(progress: 0.46, out var center, out var normal);
+        return center + (normal * GetResolvedOuterEdgeWidth());
+    }
+
+    private Point GetInnerEdgeHandlePoint()
+    {
+        GetEdgeHandleFrame(progress: 0.50, out var center, out var normal);
+        return center - (normal * GetResolvedInnerEdgeWidth());
+    }
+
+    private Point GetTailSweepHandlePoint()
+    {
+        var direction = GetStartDirection();
+        var normal = new Vector(-direction.Y, direction.X);
+        return Start - (direction * (24 + (GetResolvedShaftThickness() * 2.5))) + (normal * GetResolvedTailSweep());
+    }
+
+    private Point GetHeadSkewHandlePoint()
+    {
+        var frame = GetArrowHeadFrame(GetResolvedHeadLength(), GetResolvedHeadWidth());
+        return frame.BaseCenter;
+    }
+
+    private void GetEdgeHandleFrame(double progress, out Point center, out Vector normal)
+    {
+        var points = GetSampledCenterlinePoints(trimmedForArrowHead: true, sampleCount: 36);
+        if (points.Count < 2)
+        {
+            center = new Point((Start.X + End.X) / 2, (Start.Y + End.Y) / 2);
+            normal = GetFallbackNormal();
+            return;
+        }
+
+        var index = Math.Clamp((int)Math.Round((points.Count - 1) * progress), 1, points.Count - 2);
+        center = points[index];
+        normal = GetPolylineNormal(points, index);
+    }
+
+    private (Point BaseCenter, Vector Direction, Vector Normal) GetArrowHeadBasis(double headLength)
+    {
+        var direction = GetArrowHeadDirection();
+        if (direction.Length < 0.001)
+        {
+            direction = End - Start;
+        }
+
+        if (direction.Length < 0.001)
+        {
+            direction = new Vector(1, 0);
+        }
+
+        direction.Normalize();
+        var normal = new Vector(-direction.Y, direction.X);
+        return (End - (direction * headLength), direction, normal);
+    }
+
+    private Vector GetFallbackNormal()
+    {
+        var direction = End - Start;
+        if (direction.Length < 0.001)
+        {
+            direction = new Vector(1, 0);
+        }
+
+        direction.Normalize();
+        return new Vector(-direction.Y, direction.X);
+    }
+
+    private void SetShaftThicknessFromHandle(Point point)
+    {
+        GetThicknessHandleFrame(out var center, out var normal);
+        var offset = Math.Abs(Vector.Multiply(point - center, normal));
+        ShaftThickness = Math.Clamp(offset * 2, MinShaftThickness, MaxShaftThickness);
+    }
+
+    private void SetHeadLengthFromHandle(Point point)
+    {
+        var frame = GetArrowHeadFrame(GetResolvedHeadLength(), GetResolvedHeadWidth());
+        var projectedLength = Vector.Multiply(End - point, frame.Direction);
+        HeadLength = Math.Clamp(projectedLength, MinHeadLength, MaxHeadLength);
+    }
+
+    private void SetHeadWidthFromHandle(Point point)
+    {
+        var frame = GetArrowHeadFrame(GetResolvedHeadLength(), GetResolvedHeadWidth());
+        var projectedWidth = Math.Abs(Vector.Multiply(point - frame.BaseCenter, frame.Normal));
+        HeadWidth = Math.Clamp(projectedWidth, MinHeadWidth, MaxHeadWidth);
+    }
+
+    private void SetOuterEdgeFromHandle(Point point)
+    {
+        GetEdgeHandleFrame(progress: 0.46, out var center, out var normal);
+        var projectedWidth = Vector.Multiply(point - center, normal) * 1.35;
+        OuterEdgeWidth = Math.Clamp(projectedWidth, MinEdgeWidth, MaxEdgeWidth);
+    }
+
+    private void SetInnerEdgeFromHandle(Point point)
+    {
+        GetEdgeHandleFrame(progress: 0.50, out var center, out var normal);
+        var projectedWidth = Vector.Multiply(center - point, normal) * 1.35;
+        InnerEdgeWidth = Math.Clamp(projectedWidth, MinEdgeWidth, MaxEdgeWidth);
+    }
+
+    private void SetTailSweepFromHandle(Point point)
+    {
+        var direction = GetStartDirection();
+        var normal = new Vector(-direction.Y, direction.X);
+        var basePoint = Start - (direction * (24 + (GetResolvedShaftThickness() * 2.5)));
+        var projectedSweep = Vector.Multiply(point - basePoint, normal) * 1.45;
+        TailSweep = Math.Clamp(projectedSweep, MinTailSweep, MaxTailSweep);
+    }
+
+    private void SetHeadSkewFromHandle(Point point)
+    {
+        var basis = GetArrowHeadBasis(GetResolvedHeadLength());
+        var projectedSkew = Vector.Multiply(point - basis.BaseCenter, basis.Normal) * 1.4;
+        HeadSkew = Math.Clamp(projectedSkew, MinHeadSkew, MaxHeadSkew);
     }
 }

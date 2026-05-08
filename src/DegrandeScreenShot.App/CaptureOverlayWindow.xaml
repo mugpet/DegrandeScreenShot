@@ -19,13 +19,12 @@
             <Rectangle x:Name="RightShade" Fill="{StaticResource OverlayDimBrush}" IsHitTestVisible="False" />
             <Rectangle x:Name="BottomShade" Fill="{StaticResource OverlayDimBrush}" IsHitTestVisible="False" />
 
-            <Rectangle x:Name="SelectionFill" Fill="{StaticResource SelectionFillBrush}" Visibility="Collapsed" IsHitTestVisible="False" />
-            <Rectangle x:Name="SelectionBorder" Stroke="{StaticResource SelectionStrokeBrush}" StrokeThickness="2" RadiusX="10" RadiusY="10" Visibility="Collapsed" IsHitTestVisible="False" />
+            <Rectangle x:Name="SelectionBorder" Stroke="{StaticResource SelectionStrokeBrush}" StrokeThickness="2" RadiusX="3" RadiusY="3" Visibility="Collapsed" IsHitTestVisible="False" />
 
                 <Border x:Name="SelectionInfoPanel"
                     Padding="10,6"
-                    Background="#DD111715"
-                    BorderBrush="#33125B50"
+                    Background="#DD131921"
+                    BorderBrush="#661AA9D8"
                     BorderThickness="1"
                     CornerRadius="10"
                     Visibility="Collapsed"
@@ -40,19 +39,19 @@
             <Border x:Name="HintPanel"
                     Width="320"
                     Padding="16"
-                    Background="#CC111715"
+                    Background="#CC131921"
                     CornerRadius="18"
                     IsHitTestVisible="False">
                 <StackPanel>
                     <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Select a region" />
-                    <TextBlock Margin="0,8,0,0" Foreground="#FFD5DDDA" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel." TextWrapping="Wrap" />
+                    <TextBlock Margin="0,8,0,0" Foreground="#FFD4E5ED" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
             <Border x:Name="ActionPanel"
                     Width="240"
                     Padding="14"
-                    Background="#F4FCFDFB"
+                    Background="#F4F4F8FB"
                     BorderBrush="{StaticResource PanelBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="18"

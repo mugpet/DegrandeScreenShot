@@ -237,7 +237,6 @@ public partial class CaptureOverlayWindow : Window
             SetRect(LeftShade, 0, 0, 0, 0);
             SetRect(RightShade, 0, 0, 0, 0);
             SetRect(BottomShade, 0, 0, 0, 0);
-            SelectionFill.Visibility = Visibility.Collapsed;
             SelectionBorder.Visibility = Visibility.Collapsed;
             SelectionInfoPanel.Visibility = Visibility.Collapsed;
             return;
@@ -248,7 +247,6 @@ public partial class CaptureOverlayWindow : Window
         SetRect(LeftShade, 0, rect.Top, rect.Left, rect.Height);
         SetRect(RightShade, rect.Right, rect.Top, width - rect.Right, rect.Height);
         SetRect(BottomShade, 0, rect.Bottom, width, height - rect.Bottom);
-        SetRect(SelectionFill, rect.Left, rect.Top, rect.Width, rect.Height);
         SetRect(SelectionBorder, rect.Left, rect.Top, rect.Width, rect.Height);
         SelectionInfoText.Text = $"{rect.Width} x {rect.Height}";
         SelectionInfoPanel.Visibility = Visibility.Visible;
@@ -261,7 +259,6 @@ public partial class CaptureOverlayWindow : Window
             : Math.Min(height - labelHeight - 24, rect.Bottom + 10);
         Canvas.SetLeft(SelectionInfoPanel, labelLeft);
         Canvas.SetTop(SelectionInfoPanel, Math.Max(24, labelTop));
-        SelectionFill.Visibility = Visibility.Visible;
         SelectionBorder.Visibility = Visibility.Visible;
     }
 

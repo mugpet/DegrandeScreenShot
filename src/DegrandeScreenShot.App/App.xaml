@@ -11,8 +11,7 @@
         <Color x:Key="TextColor">#19211E</Color>
         <Color x:Key="MutedTextColor">#5E6A64</Color>
         <Color x:Key="CanvasColor">#EEF1EC</Color>
-        <Color x:Key="SelectionFillColor">#20125B50</Color>
-        <Color x:Key="SelectionStrokeColor">#125B50</Color>
+        <Color x:Key="SelectionStrokeColor">#FF1AA9D8</Color>
         <Color x:Key="OverlayDimColor">#21000000</Color>
 
         <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
@@ -23,7 +22,6 @@
         <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}" />
         <SolidColorBrush x:Key="MutedTextBrush" Color="{StaticResource MutedTextColor}" />
         <SolidColorBrush x:Key="CanvasBrush" Color="{StaticResource CanvasColor}" />
-        <SolidColorBrush x:Key="SelectionFillBrush" Color="{StaticResource SelectionFillColor}" />
         <SolidColorBrush x:Key="SelectionStrokeBrush" Color="{StaticResource SelectionStrokeColor}" />
         <SolidColorBrush x:Key="OverlayDimBrush" Color="{StaticResource OverlayDimColor}" />
 
