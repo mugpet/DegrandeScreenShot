@@ -24,15 +24,33 @@ namespace DegrandeScreenShot.App;
 public partial class EditorWindow : Window
 {
     internal static readonly Color DefaultAccentColor = Color.FromRgb(18, 91, 80);
-    internal static readonly Color DefaultArrowColor = Color.FromRgb(242, 162, 58);
+    private static readonly Color LegacyDefaultArrowColor = Color.FromRgb(242, 162, 58);
+    internal static readonly Color DefaultArrowColor = Color.FromRgb(236, 72, 153);
     internal static readonly Color DefaultTextColor = Color.FromRgb(108, 75, 22);
     internal static readonly Color DefaultObscureColor = Color.FromRgb(217, 72, 65);
+    internal static readonly Color DefaultHighlightColor = Color.FromRgb(245, 217, 10);
     internal const double DefaultTextFontSize = 26;
     internal const double DefaultTextBackgroundOpacity = 0.80;
     internal const double DefaultTextBackgroundStrength = 0.30;
-    internal const double DefaultObscureColorStrength = 0.10;
+    internal const double DefaultObscureColorStrength = 0.15;
     internal const double DefaultObscureBlurLevel = 0.00;
-    internal const double DefaultObscurePixelationLevel = 0.25;
+    internal const double DefaultObscurePixelationLevel = 0.20;
+    internal const double DefaultHighlightStrength = 0.55;
+    internal const double DefaultShapeShadowStrength = 0.00;
+    internal const double DefaultShapeBorderWidth = 4.00;
+    internal const double DefaultTextShadowStrength = 0.00;
+    internal const double DefaultTextBorderWidth = 1.00;
+    internal const double DefaultObscureShadowStrength = 0.00;
+    internal const double DefaultObscureBorderWidth = 0.00;
+    internal const double DefaultHighlightShadowStrength = 0.00;
+    internal const double DefaultHighlightBorderWidth = 0.00;
+    internal const double DefaultArrowTailScale = 1.00;
+    internal const double DefaultArrowBodyScale = 0.20;
+    internal const double DefaultArrowFrontScale = 0.30;
+    internal const double DefaultArrowHeadScale = 0.40;
+    internal const double DefaultArrowTailHeadScale = 1.00;
+    internal const double DefaultArrowShadowStrength = 0.00;
+    internal const double DefaultArrowBorderWidth = 2.00;
     private const string WindowsThemeRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
     private const int DwmUseImmersiveDarkModeAttribute = 20;
     private const int DwmBorderColorAttribute = 34;
@@ -41,7 +59,7 @@ public partial class EditorWindow : Window
     private const uint DwmColorDefault = 0xFFFFFFFF;
     private const double SelectionActionIslandSpacing = 18;
     private const double SelectionActionIslandViewportPadding = 18;
-    private const double MinZoomLevel = 0.35;
+    private const double MinZoomLevel = 0.05;
     private const double MaxZoomLevel = 4.0;
     private const double ZoomStepFactor = 1.15;
     private const int MaxArrowShapePresets = 12;
@@ -70,12 +88,17 @@ public partial class EditorWindow : Window
     private string? _activeHandle;
     private string? _savedPath;
     private bool _isUpdatingInlineTextEditor;
+    private bool _isUpdatingTextFontSize;
     private bool _isUpdatingTextBackgroundOpacity;
     private bool _isUpdatingTextBackgroundStrength;
     private bool _isUpdatingObscureBlurLevel;
     private bool _isUpdatingObscurePixelationLevel;
     private bool _isUpdatingObscureColorStrength;
+    private bool _isUpdatingHighlightStrength;
+    private bool _isUpdatingObjectShadowStrength;
+    private bool _isUpdatingObjectBorderWidth;
     private bool _hasFittedInitialWindowSize;
+    private SnapshotPreviewWindow? _previewWindow;
     private double _zoomLevel = 1.0;
     private Point? _panStartViewportPoint;
     private double _panStartHorizontalOffset;
@@ -84,19 +107,28 @@ public partial class EditorWindow : Window
     private Color _lastShapeColor = DefaultAccentColor;
     private Color _lastArrowColor = DefaultArrowColor;
     private ArrowStyle _lastArrowStyle = ArrowStyle.BrushStroke;
-    private double _lastArrowTailScale = 1.0;
-    private double _lastArrowBodyScale = 1.0;
-    private double _lastArrowFrontScale = 1.0;
-    private double _lastArrowHeadScale = 1.0;
-    private double _lastArrowShadowStrength;
-    private double _lastArrowBorderWidth;
+    private double _lastArrowTailScale = DefaultArrowTailScale;
+    private double _lastArrowBodyScale = DefaultArrowBodyScale;
+    private double _lastArrowFrontScale = DefaultArrowFrontScale;
+    private double _lastArrowHeadScale = DefaultArrowHeadScale;
+    private double _lastArrowTailHeadScale = DefaultArrowTailHeadScale;
+    private double _lastArrowShadowStrength = DefaultArrowShadowStrength;
+    private double _lastArrowBorderWidth = DefaultArrowBorderWidth;
+    private bool _lastArrowHasStartHead;
+    private bool _lastArrowHasEndHead = true;
     private List<(double U, double V)> _lastArrowRelativeBendPoints = new();
     private readonly List<ArrowShapePresetPreference> _arrowShapePresets = [];
     private string? _selectedArrowPresetId;
+    private Color _lastHighlightColor = DefaultHighlightColor;
+    private double _lastHighlightStrength = DefaultHighlightStrength;
+    private HighlightMode _lastHighlightMode = HighlightMode.Region;
     private Color _lastTextColor = DefaultTextColor;
     private double _lastTextFontSize = DefaultTextFontSize;
     private double _lastTextBackgroundOpacity = DefaultTextBackgroundOpacity;
     private double _lastTextBackgroundStrength = DefaultTextBackgroundStrength;
+    private System.Windows.TextAlignment _lastTextAlignment = System.Windows.TextAlignment.Left;
+    private bool _lastTextIsBold = false;
+    private bool _isUpdatingTextAlignment;
     private Color _lastObscureColor = DefaultObscureColor;
     private ObscureMode _lastObscureMode = ObscureMode.Blur;
     private double _lastObscureColorStrength = DefaultObscureColorStrength;
@@ -119,11 +151,14 @@ public partial class EditorWindow : Window
         ApplyTheme();
         SelectToolButton.IsChecked = true;
         UpdateArrowPresetButtonLabel();
+        UpdateHighlightModeButtonLabel();
         RefreshCanvas();
     }
 
     private void EditorWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        AttachSelectionActionIslandToFooter();
+
         if (_hasFittedInitialWindowSize)
         {
             return;
@@ -131,6 +166,30 @@ public partial class EditorWindow : Window
 
         _hasFittedInitialWindowSize = true;
         Dispatcher.BeginInvoke(new Action(FitWindowToArtwork), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    private void AttachSelectionActionIslandToFooter()
+    {
+        if (ReferenceEquals(SelectionActionIsland.Parent, EditorFooterStack))
+        {
+            return;
+        }
+
+        if (SelectionActionIsland.Parent is Panel currentParent)
+        {
+            currentParent.Children.Remove(SelectionActionIsland);
+        }
+
+        SelectionActionIsland.Margin = new Thickness(0, 0, 0, 14);
+        SelectionActionIsland.HorizontalAlignment = HorizontalAlignment.Center;
+        SelectionActionIsland.VerticalAlignment = VerticalAlignment.Center;
+        SelectionActionIslandTransform.X = 0;
+        SelectionActionIslandTransform.Y = 0;
+
+        var toolbarIndex = EditorFooterStack.Children.IndexOf(ToolbarIsland);
+        EditorFooterStack.Children.Insert(
+            toolbarIndex >= 0 ? toolbarIndex : EditorFooterStack.Children.Count,
+            SelectionActionIsland);
     }
 
     private void EditorWindow_SourceInitialized(object? sender, EventArgs e)
@@ -209,6 +268,11 @@ public partial class EditorWindow : Window
         SetBrushColor("ScrollBarThumbBrush", palette.ScrollBarThumb);
         SetBrushColor("ScrollBarThumbHoverBrush", palette.ScrollBarThumbHover);
         SetBrushColor("ScrollBarThumbPressedBrush", palette.ScrollBarThumbPressed);
+        SetBrushColor("EditorSliderTrackBrush", palette.SliderTrack);
+        SetBrushColor("EditorSliderFillBrush", palette.SliderFill);
+        SetBrushColor("EditorSliderFillHoverBrush", palette.SliderFillHover);
+        SetBrushColor("EditorSliderThumbBrush", palette.SliderThumb);
+        SetBrushColor("EditorSliderThumbBorderBrush", palette.SliderThumbBorder);
         SetGradientBrushColors("ShellGlowBrush", palette.GlowStart, palette.GlowMiddle, palette.GlowEnd);
         UpdateThemeModeButton();
         ApplyNativeTitleBarTheme();
@@ -299,7 +363,7 @@ public partial class EditorWindow : Window
     {
         _contextMenuAnnotation = null;
 
-        foreach (var button in new[] { SelectToolButton, CropToolButton, ArrowToolButton, RectangleToolButton, EllipseToolButton, ObscureToolButton, TextToolButton })
+        foreach (var button in new[] { SelectToolButton, CropToolButton, ArrowToolButton, RectangleToolButton, EllipseToolButton, ObscureToolButton, HighlightToolButton, TextToolButton })
         {
             if (!ReferenceEquals(button, sender))
             {
@@ -438,6 +502,17 @@ public partial class EditorWindow : Window
             return;
         }
 
+        if (_currentTool == EditorTool.Highlight && _lastHighlightMode == HighlightMode.Freehand)
+        {
+            var annotation = HighlightAnnotation.CreateFreehand(point);
+            ApplyLastUsedHighlightStyle(annotation);
+            _annotations.Add(annotation);
+            _selectedAnnotation = annotation;
+            _dragOperation = DragOperation.Draw;
+            RefreshCanvas();
+            return;
+        }
+
         if (IsDeferredDrawTool(_currentTool))
         {
             _dragStart = point;
@@ -486,6 +561,19 @@ public partial class EditorWindow : Window
         {
             var annotation = new ObscureAnnotation { Bounds = new Rect(point, point) };
             ApplyLastUsedObscureStyle(annotation);
+            _annotations.Add(annotation);
+            _selectedAnnotation = annotation;
+            _dragOperation = DragOperation.Draw;
+            RefreshCanvas();
+            return;
+        }
+
+        if (_currentTool == EditorTool.Highlight)
+        {
+            var annotation = _lastHighlightMode == HighlightMode.Line
+                ? HighlightAnnotation.CreateLine(point)
+                : HighlightAnnotation.CreateRegion(point);
+            ApplyLastUsedHighlightStyle(annotation);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
             _dragOperation = DragOperation.Draw;
@@ -598,6 +686,7 @@ public partial class EditorWindow : Window
             if (_selectedAnnotation is not null)
             {
                 _selectedAnnotation.UpdateFromAnchor(_dragStart.Value, drawPoint, ShouldConstrainAspectRatio());
+                ClampSelectedObscureAnnotationToCanvas(preserveSize: false);
                 if (_selectedAnnotation is ArrowAnnotation deferredArrow)
                 {
                     ApplyLastUsedArrowBendPoints(deferredArrow);
@@ -660,6 +749,7 @@ public partial class EditorWindow : Window
         {
             case DragOperation.Draw:
                 _selectedAnnotation.UpdateFromAnchor(_dragStart.Value, point, ShouldConstrainAspectRatio());
+                ClampSelectedObscureAnnotationToCanvas(preserveSize: false);
                 if (_selectedAnnotation is ArrowAnnotation drawingArrow)
                 {
                     ApplyLastUsedArrowBendPoints(drawingArrow);
@@ -667,10 +757,12 @@ public partial class EditorWindow : Window
                 break;
             case DragOperation.Move:
                 _selectedAnnotation.Move(point - _dragStart.Value);
+                ClampSelectedObscureAnnotationToCanvas(preserveSize: true);
                 _dragStart = point;
                 break;
             case DragOperation.Handle when _activeHandle is not null:
                 _selectedAnnotation.MoveHandle(_activeHandle, point, ShouldConstrainAspectRatio());
+                ClampSelectedObscureAnnotationToCanvas(preserveSize: false);
                 break;
         }
 
@@ -844,6 +936,11 @@ public partial class EditorWindow : Window
                 PersistEditorPreferences();
                 RefreshCanvas();
             }
+            else if (_currentTool == EditorTool.Highlight)
+            {
+                _lastHighlightColor = color;
+                RefreshCanvas();
+            }
             else if (_currentTool == EditorTool.Obscure)
             {
                 _lastObscureColor = color;
@@ -864,12 +961,57 @@ public partial class EditorWindow : Window
             case ArrowAnnotation:
                 _lastArrowColor = color;
                 break;
+            case HighlightAnnotation:
+                _lastHighlightColor = color;
+                break;
             case TextAnnotation:
                 _lastTextColor = color;
                 break;
             case ObscureAnnotation:
                 _lastObscureColor = color;
                 break;
+        }
+
+        PersistEditorPreferences();
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void HighlightStrengthSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_isUpdatingHighlightStrength || _contextMenuAnnotation is not HighlightAnnotation highlightAnnotation)
+        {
+            return;
+        }
+
+        var strength = HighlightStrengthSlider.Value / 100d;
+        highlightAnnotation.SetColorStrength(strength);
+        _lastHighlightStrength = highlightAnnotation.ColorStrength;
+        HighlightStrengthValueText.Text = $"{(int)Math.Round(HighlightStrengthSlider.Value)}%";
+        PersistEditorPreferences();
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void TextFontSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TextFontSizeValueText is null)
+        {
+            return;
+        }
+
+        var fontSize = Math.Round(e.NewValue);
+        TextFontSizeValueText.Text = fontSize.ToString("0", CultureInfo.InvariantCulture);
+        if (_isUpdatingTextFontSize || _contextMenuAnnotation is not TextAnnotation textAnnotation)
+        {
+            return;
+        }
+
+        textAnnotation.SetFontSize(fontSize);
+        _lastTextFontSize = fontSize;
+        if (ReferenceEquals(_editingTextAnnotation, textAnnotation))
+        {
+            InlineTextEditor.FontSize = fontSize;
         }
 
         PersistEditorPreferences();
@@ -983,6 +1125,145 @@ public partial class EditorWindow : Window
         RefreshCanvas();
     }
 
+    private void ObjectShadowSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ObjectShadowValueLabel is null)
+        {
+            return;
+        }
+
+        ObjectShadowValueLabel.Text = $"{Math.Round(e.NewValue):0}%";
+        if (_isUpdatingObjectShadowStrength || _contextMenuAnnotation is not IBorderShadowAnnotation styleAnnotation || _contextMenuAnnotation is ArrowAnnotation)
+        {
+            return;
+        }
+
+        styleAnnotation.SetShadowStrength(Math.Clamp(e.NewValue / 100d, 0, 1));
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void ObjectBorderSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ObjectBorderValueLabel is null)
+        {
+            return;
+        }
+
+        ObjectBorderValueLabel.Text = e.NewValue.ToString("0.0", CultureInfo.InvariantCulture);
+        if (_isUpdatingObjectBorderWidth || _contextMenuAnnotation is not IBorderShadowAnnotation styleAnnotation || _contextMenuAnnotation is ArrowAnnotation)
+        {
+            return;
+        }
+
+        styleAnnotation.SetBorderWidth(Math.Clamp(e.NewValue, 0, 12));
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void ResetAnnotation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_contextMenuAnnotation is null)
+        {
+            return;
+        }
+
+        ResetAnnotationToDefaults(_contextMenuAnnotation);
+        UpdateSelectionAnnotationControls(_contextMenuAnnotation);
+        PersistEditorPreferences();
+        CommitHistoryState();
+        RefreshCanvas();
+        UpdateSelectionActionIsland();
+    }
+
+    private void ResetAnnotationToDefaults(AnnotationBase annotation)
+    {
+        switch (annotation)
+        {
+            case RectangleAnnotation rectangle:
+                rectangle.SetColor(DefaultAccentColor);
+                rectangle.SetShadowStrength(DefaultShapeShadowStrength);
+                rectangle.SetBorderWidth(DefaultShapeBorderWidth);
+                _lastShapeColor = DefaultAccentColor;
+                break;
+            case EllipseAnnotation ellipse:
+                ellipse.SetColor(DefaultAccentColor);
+                ellipse.SetShadowStrength(DefaultShapeShadowStrength);
+                ellipse.SetBorderWidth(DefaultShapeBorderWidth);
+                _lastShapeColor = DefaultAccentColor;
+                break;
+            case TextAnnotation text:
+                text.SetColor(DefaultTextColor);
+                text.SetFontSize(DefaultTextFontSize);
+                text.SetBackgroundOpacity(DefaultTextBackgroundOpacity);
+                text.SetBackgroundColorStrength(DefaultTextBackgroundStrength);
+                text.SetShadowStrength(DefaultTextShadowStrength);
+                text.SetBorderWidth(DefaultTextBorderWidth);
+                text.SetTextAlignment(System.Windows.TextAlignment.Left);
+                text.SetBold(false);
+                _lastTextColor = DefaultTextColor;
+                _lastTextFontSize = DefaultTextFontSize;
+                _lastTextBackgroundOpacity = DefaultTextBackgroundOpacity;
+                _lastTextBackgroundStrength = DefaultTextBackgroundStrength;
+                _lastTextAlignment = System.Windows.TextAlignment.Left;
+                _lastTextIsBold = false;
+                if (ReferenceEquals(_editingTextAnnotation, text))
+                {
+                    InlineTextEditor.FontSize = DefaultTextFontSize;
+                    InlineTextEditor.TextAlignment = System.Windows.TextAlignment.Left;
+                    InlineTextEditor.FontWeight = FontWeights.Normal;
+                }
+                break;
+            case ObscureAnnotation obscure:
+                obscure.SetColor(DefaultObscureColor);
+                obscure.SetBlurLevel(DefaultObscureBlurLevel);
+                obscure.SetPixelationLevel(DefaultObscurePixelationLevel);
+                obscure.SetColorStrength(DefaultObscureColorStrength);
+                obscure.SetShadowStrength(DefaultObscureShadowStrength);
+                obscure.SetBorderWidth(DefaultObscureBorderWidth);
+                _lastObscureColor = DefaultObscureColor;
+                _lastObscureBlurLevel = DefaultObscureBlurLevel;
+                _lastObscurePixelationLevel = DefaultObscurePixelationLevel;
+                _lastObscureColorStrength = DefaultObscureColorStrength;
+                break;
+            case HighlightAnnotation highlight:
+                highlight.SetColor(DefaultHighlightColor);
+                highlight.SetColorStrength(DefaultHighlightStrength);
+                highlight.SetShadowStrength(DefaultHighlightShadowStrength);
+                highlight.SetBorderWidth(DefaultHighlightBorderWidth);
+                _lastHighlightColor = DefaultHighlightColor;
+                _lastHighlightStrength = DefaultHighlightStrength;
+                break;
+            case ArrowAnnotation arrow:
+                arrow.SetColor(DefaultArrowColor);
+                arrow.SetStyle(ArrowStyle.BrushStroke);
+                arrow.SetTailScale(DefaultArrowTailScale);
+                arrow.SetBodyScale(DefaultArrowBodyScale);
+                arrow.SetFrontScale(DefaultArrowFrontScale);
+                arrow.SetHeadScale(DefaultArrowHeadScale);
+                arrow.SetTailHeadScale(DefaultArrowTailHeadScale);
+                arrow.SetShadowStrength(DefaultArrowShadowStrength);
+                arrow.SetBorderWidth(DefaultArrowBorderWidth);
+                arrow.SetStartHeadEnabled(false);
+                arrow.SetEndHeadEnabled(true);
+                arrow.BendPoints.Clear();
+                _lastArrowColor = DefaultArrowColor;
+                _lastArrowStyle = ArrowStyle.BrushStroke;
+                _lastArrowTailScale = DefaultArrowTailScale;
+                _lastArrowBodyScale = DefaultArrowBodyScale;
+                _lastArrowFrontScale = DefaultArrowFrontScale;
+                _lastArrowHeadScale = DefaultArrowHeadScale;
+                _lastArrowTailHeadScale = DefaultArrowTailHeadScale;
+                _lastArrowShadowStrength = DefaultArrowShadowStrength;
+                _lastArrowBorderWidth = DefaultArrowBorderWidth;
+                _lastArrowHasStartHead = false;
+                _lastArrowHasEndHead = true;
+                ClearSelectedArrowPreset();
+                UpdateArrowPresetButtonLabel();
+                break;
+        }
+    }
+
     private void DeleteAnnotation_Click(object sender, RoutedEventArgs e)
     {
         if (_contextMenuAnnotation is null)
@@ -991,6 +1272,62 @@ public partial class EditorWindow : Window
         }
 
         RemoveAnnotation(_contextMenuAnnotation);
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void LayerTop_Click(object sender, RoutedEventArgs e)
+    {
+        MoveSelectedAnnotationLayer(LayerMove.Top);
+    }
+
+    private void LayerUp_Click(object sender, RoutedEventArgs e)
+    {
+        MoveSelectedAnnotationLayer(LayerMove.Up);
+    }
+
+    private void LayerDown_Click(object sender, RoutedEventArgs e)
+    {
+        MoveSelectedAnnotationLayer(LayerMove.Down);
+    }
+
+    private void LayerBottom_Click(object sender, RoutedEventArgs e)
+    {
+        MoveSelectedAnnotationLayer(LayerMove.Bottom);
+    }
+
+    private void MoveSelectedAnnotationLayer(LayerMove move)
+    {
+        if (_selectedAnnotation is null)
+        {
+            return;
+        }
+
+        var currentIndex = _annotations.IndexOf(_selectedAnnotation);
+        if (currentIndex < 0)
+        {
+            return;
+        }
+
+        var targetIndex = move switch
+        {
+            LayerMove.Top => _annotations.Count - 1,
+            LayerMove.Up => Math.Min(_annotations.Count - 1, currentIndex + 1),
+            LayerMove.Down => Math.Max(0, currentIndex - 1),
+            LayerMove.Bottom => 0,
+            _ => currentIndex,
+        };
+
+        if (targetIndex == currentIndex)
+        {
+            UpdateLayerActionIsland();
+            return;
+        }
+
+        _annotations.RemoveAt(currentIndex);
+        _annotations.Insert(targetIndex, _selectedAnnotation);
+        _contextMenuAnnotation = _selectedAnnotation;
+        _hoveredAnnotation = _selectedAnnotation;
         CommitHistoryState();
         RefreshCanvas();
     }
@@ -1025,6 +1362,21 @@ public partial class EditorWindow : Window
             return;
         }
 
+        if (modifiers.HasFlag(ModifierKeys.Control) && e.Key == Key.D0)
+        {
+            SetZoomLevel(1.0);
+            CenterArtworkInViewport();
+            e.Handled = true;
+            return;
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Control) && e.Key == Key.D1)
+        {
+            FitArtworkToView();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key != Key.Delete || _selectedAnnotation is null || _editingTextAnnotation is not null)
         {
             return;
@@ -1044,6 +1396,52 @@ public partial class EditorWindow : Window
     private void RedoHistory_Click(object sender, RoutedEventArgs e)
     {
         RedoHistory();
+    }
+
+    private void ZoomActualSize_Click(object sender, RoutedEventArgs e)
+    {
+        SetZoomLevel(1.0);
+        CenterArtworkInViewport();
+    }
+
+    private void ZoomFitToView_Click(object sender, RoutedEventArgs e)
+    {
+        FitArtworkToView();
+    }
+
+    private void FitArtworkToView()
+    {
+        var artworkWidth = ArtworkSurface.Width;
+        var artworkHeight = ArtworkSurface.Height;
+        if (artworkWidth <= 0 || artworkHeight <= 0)
+        {
+            return;
+        }
+
+        ArtworkScrollViewer.UpdateLayout();
+        var viewportWidth = ArtworkScrollViewer.ViewportWidth > 0 ? ArtworkScrollViewer.ViewportWidth : ArtworkScrollViewer.ActualWidth;
+        var viewportHeight = ArtworkScrollViewer.ViewportHeight > 0 ? ArtworkScrollViewer.ViewportHeight : ArtworkScrollViewer.ActualHeight;
+        if (viewportWidth <= 0 || viewportHeight <= 0)
+        {
+            return;
+        }
+
+        var horizontalPadding = 64d;
+        var verticalPadding = 176d;
+        var availableWidth = Math.Max(1, viewportWidth - horizontalPadding);
+        var availableHeight = Math.Max(1, viewportHeight - verticalPadding);
+        var fitZoom = Math.Min(availableWidth / artworkWidth, availableHeight / artworkHeight);
+        SetZoomLevel(fitZoom);
+        CenterArtworkInViewport();
+    }
+
+    private void SetZoomLevel(double zoomLevel)
+    {
+        _zoomLevel = Math.Clamp(zoomLevel, MinZoomLevel, MaxZoomLevel);
+        ApplyZoomTransform();
+        UpdateLayout();
+        UpdateSelectionActionIsland();
+        UpdateInlineTextEditorState();
     }
 
     private void InlineTextEditor_TextChanged(object sender, TextChangedEventArgs e)
@@ -1139,17 +1537,85 @@ public partial class EditorWindow : Window
         if (Owner is MainWindow mainWindow)
         {
             mainWindow.ShowCapturePreview(bitmap);
+            return;
         }
+
+        _previewWindow?.Close();
+
+        var handle = new WindowInteropHelper(this).Handle;
+        var screen = handle != IntPtr.Zero ? FormsScreen.FromHandle(handle) : FormsScreen.PrimaryScreen;
+        var workArea = screen?.WorkingArea ?? System.Windows.Forms.Screen.PrimaryScreen!.WorkingArea;
+
+        var preview = new SnapshotPreviewWindow(bitmap);
+        preview.Position(new Rect(workArea.Left, workArea.Top, workArea.Width, workArea.Height));
+        preview.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_previewWindow, preview))
+            {
+                _previewWindow = null;
+            }
+        };
+
+        _previewWindow = preview;
+        preview.Show();
     }
 
     private void UpdateSelectionAnnotationControls(AnnotationBase? annotation)
     {
         UpdateArrowAnnotationControls(annotation as ArrowAnnotation);
+        UpdateObjectStyleControls(annotation);
         UpdateTextAnnotationControls(annotation as TextAnnotation);
         UpdateObscureAnnotationControls(annotation as ObscureAnnotation);
+        UpdateHighlightAnnotationControls(annotation as HighlightAnnotation);
     }
 
     private bool _suppressArrowSliderEvents;
+
+    private void HighlightToolButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (HighlightToolButton.IsChecked != true)
+        {
+            HighlightToolButton.IsChecked = true;
+        }
+
+        HighlightModePopup.IsOpen = true;
+    }
+
+    private void HighlightModeOption_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string modeValue }
+            || !Enum.TryParse<HighlightMode>(modeValue, ignoreCase: true, out var mode))
+        {
+            return;
+        }
+
+        SetHighlightMode(mode);
+        HighlightModePopup.IsOpen = false;
+    }
+
+    private void SetHighlightMode(HighlightMode mode)
+    {
+        _lastHighlightMode = mode;
+        UpdateHighlightModeButtonLabel();
+        if (HighlightToolButton.IsChecked != true)
+        {
+            HighlightToolButton.IsChecked = true;
+        }
+    }
+
+    private void UpdateHighlightModeButtonLabel()
+    {
+        HighlightAreaToolIcon.Visibility = _lastHighlightMode == HighlightMode.Region ? Visibility.Visible : Visibility.Collapsed;
+        HighlightLineToolIcon.Visibility = _lastHighlightMode == HighlightMode.Line ? Visibility.Visible : Visibility.Collapsed;
+        HighlightFreehandToolIcon.Visibility = _lastHighlightMode == HighlightMode.Freehand ? Visibility.Visible : Visibility.Collapsed;
+
+        HighlightToolButton.ToolTip = _lastHighlightMode switch
+        {
+            HighlightMode.Line => "Line highlight",
+            HighlightMode.Freehand => "Freehand highlight",
+            _ => "Area highlight",
+        };
+    }
 
     private void UpdateArrowAnnotationControls(ArrowAnnotation? arrowAnnotation)
     {
@@ -1167,8 +1633,11 @@ public partial class EditorWindow : Window
         var bodyScale = arrowAnnotation?.BodyScale ?? _lastArrowBodyScale;
         var frontScale = arrowAnnotation?.FrontScale ?? _lastArrowFrontScale;
         var headScale = arrowAnnotation?.HeadScale ?? _lastArrowHeadScale;
+        var tailHeadScale = arrowAnnotation?.TailHeadScale ?? _lastArrowTailHeadScale;
         var shadowStrength = arrowAnnotation?.ShadowStrength ?? _lastArrowShadowStrength;
         var borderWidth = arrowAnnotation?.BorderWidth ?? _lastArrowBorderWidth;
+        var hasEndHead = arrowAnnotation?.HasEndHead ?? _lastArrowHasEndHead;
+        var hasStartHead = arrowAnnotation?.HasStartHead ?? _lastArrowHasStartHead;
 
         _suppressArrowSliderEvents = true;
         try
@@ -1177,8 +1646,11 @@ public partial class EditorWindow : Window
             ArrowBodySlider.Value = bodyScale;
             ArrowFrontSlider.Value = frontScale;
             ArrowHeadSlider.Value = headScale;
+            ArrowTailHeadSlider.Value = tailHeadScale;
             ArrowShadowSlider.Value = shadowStrength * 100;
             ArrowBorderSlider.Value = borderWidth;
+            ArrowHeadToggleButton.IsChecked = hasEndHead;
+            ArrowTailToggleButton.IsChecked = hasStartHead;
         }
         finally
         {
@@ -1188,6 +1660,7 @@ public partial class EditorWindow : Window
         ArrowBodyValueLabel.Text = bodyScale.ToString("0.00", CultureInfo.InvariantCulture);
         ArrowFrontValueLabel.Text = frontScale.ToString("0.00", CultureInfo.InvariantCulture);
         ArrowHeadValueLabel.Text = headScale.ToString("0.00", CultureInfo.InvariantCulture);
+        ArrowTailHeadValueLabel.Text = tailHeadScale.ToString("0.00", CultureInfo.InvariantCulture);
         ArrowShadowValueLabel.Text = $"{Math.Round(shadowStrength * 100):0}%";
         ArrowBorderValueLabel.Text = borderWidth.ToString("0.0", CultureInfo.InvariantCulture);
         UpdateArrowPresetButtonLabel();
@@ -1258,6 +1731,21 @@ public partial class EditorWindow : Window
         }
     }
 
+    private void ArrowTailHeadSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ArrowTailHeadValueLabel is null) return;
+        ArrowTailHeadValueLabel.Text = e.NewValue.ToString("0.00", CultureInfo.InvariantCulture);
+        if (_suppressArrowSliderEvents) return;
+        _lastArrowTailHeadScale = e.NewValue;
+        ClearSelectedArrowPreset();
+        UpdateArrowPresetButtonLabel();
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetTailHeadScale(e.NewValue);
+            RefreshCanvas();
+        }
+    }
+
     private void ArrowShadowSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (ArrowShadowValueLabel is null) return;
@@ -1288,11 +1776,145 @@ public partial class EditorWindow : Window
         }
     }
 
+    private void ArrowHeadToggleButton_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_suppressArrowSliderEvents)
+        {
+            return;
+        }
+
+        _lastArrowHasEndHead = ArrowHeadToggleButton.IsChecked == true;
+        ClearSelectedArrowPreset();
+        UpdateArrowPresetButtonLabel();
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetEndHeadEnabled(_lastArrowHasEndHead);
+            RefreshCanvas();
+        }
+    }
+
+    private void ArrowTailToggleButton_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_suppressArrowSliderEvents)
+        {
+            return;
+        }
+
+        _lastArrowHasStartHead = ArrowTailToggleButton.IsChecked == true;
+        ClearSelectedArrowPreset();
+        UpdateArrowPresetButtonLabel();
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetStartHeadEnabled(_lastArrowHasStartHead);
+            RefreshCanvas();
+        }
+    }
+
     private void ArrowPresetButton_Click(object sender, RoutedEventArgs e)
     {
         RebuildArrowPresetButtons();
         ArrowPresetPopup.IsOpen = !ArrowPresetPopup.IsOpen;
     }
+
+    private void TextAlignLeft_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingTextAlignment)
+        {
+            return;
+        }
+
+        _isUpdatingTextAlignment = true;
+        TextAlignLeftButton.IsChecked = true;
+        TextAlignCenterButton.IsChecked = false;
+        TextAlignRightButton.IsChecked = false;
+        _isUpdatingTextAlignment = false;
+
+        _lastTextAlignment = System.Windows.TextAlignment.Left;
+        if (_selectedAnnotation is TextAnnotation text)
+        {
+            text.SetTextAlignment(System.Windows.TextAlignment.Left);
+            if (ReferenceEquals(_editingTextAnnotation, text))
+            {
+                InlineTextEditor.TextAlignment = System.Windows.TextAlignment.Left;
+            }
+
+            RefreshCanvas();
+        }
+    }
+
+    private void TextAlignCenter_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingTextAlignment)
+        {
+            return;
+        }
+
+        _isUpdatingTextAlignment = true;
+        TextAlignLeftButton.IsChecked = false;
+        TextAlignCenterButton.IsChecked = true;
+        TextAlignRightButton.IsChecked = false;
+        _isUpdatingTextAlignment = false;
+
+        _lastTextAlignment = System.Windows.TextAlignment.Center;
+        if (_selectedAnnotation is TextAnnotation text)
+        {
+            text.SetTextAlignment(System.Windows.TextAlignment.Center);
+            if (ReferenceEquals(_editingTextAnnotation, text))
+            {
+                InlineTextEditor.TextAlignment = System.Windows.TextAlignment.Center;
+            }
+
+            RefreshCanvas();
+        }
+    }
+
+    private void TextAlignRight_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingTextAlignment)
+        {
+            return;
+        }
+
+        _isUpdatingTextAlignment = true;
+        TextAlignLeftButton.IsChecked = false;
+        TextAlignCenterButton.IsChecked = false;
+        TextAlignRightButton.IsChecked = true;
+        _isUpdatingTextAlignment = false;
+
+        _lastTextAlignment = System.Windows.TextAlignment.Right;
+        if (_selectedAnnotation is TextAnnotation text)
+        {
+            text.SetTextAlignment(System.Windows.TextAlignment.Right);
+            if (ReferenceEquals(_editingTextAnnotation, text))
+            {
+                InlineTextEditor.TextAlignment = System.Windows.TextAlignment.Right;
+            }
+
+            RefreshCanvas();
+        }
+    }
+
+    private void TextBoldButton_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingTextAlignment)
+        {
+            return;
+        }
+
+        _lastTextIsBold = TextBoldButton.IsChecked == true;
+        if (_selectedAnnotation is TextAnnotation text)
+        {
+            text.SetBold(_lastTextIsBold);
+            if (ReferenceEquals(_editingTextAnnotation, text))
+            {
+                InlineTextEditor.FontWeight = _lastTextIsBold ? FontWeights.Bold : FontWeights.Normal;
+            }
+
+            RefreshCanvas();
+        }
+    }
+
+
 
     private void SaveArrowPresetButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1344,32 +1966,30 @@ public partial class EditorWindow : Window
         {
             var preset = _arrowShapePresets[index];
             var isSelected = string.Equals(_selectedArrowPresetId, preset.Id, StringComparison.Ordinal);
-            ArrowPresetListPanel.Children.Add(CreateArrowPresetButton(preset, index, isSelected));
+            ArrowPresetListPanel.Children.Add(CreateArrowPresetButton(preset, isSelected));
         }
     }
 
-    private Button CreateArrowPresetButton(ArrowShapePresetPreference preset, int index, bool isSelected)
+    private FrameworkElement CreateArrowPresetButton(ArrowShapePresetPreference preset, bool isSelected)
     {
         var previewArrow = CreateArrowPresetPreview(preset);
         previewArrow.SetColor(_lastArrowColor);
 
         var canvas = new Canvas
         {
-            Width = 116,
-            Height = 60,
+            Width = 108,
+            Height = 66,
             Background = Brushes.Transparent,
             IsHitTestVisible = false,
         };
         previewArrow.Render(canvas, isSelected: false, isHovered: false);
 
-        var previewBorder = new Border
+        var previewHost = new Border
         {
-            Height = 72,
-            CornerRadius = new CornerRadius(12),
-            Background = CloneBrushResource("IslandButtonBrush", new SolidColorBrush(Color.FromArgb(24, 255, 255, 255))),
-            BorderBrush = CloneBrushResource(isSelected ? "IslandButtonActiveBorderBrush" : "IslandDividerBrush", Brushes.Transparent),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(8),
+            Width = 112,
+            Height = 70,
+            Background = Brushes.Transparent,
+            Padding = new Thickness(2),
             Child = new Viewbox
             {
                 Stretch = Stretch.Uniform,
@@ -1377,36 +1997,87 @@ public partial class EditorWindow : Window
             },
         };
 
-        var label = new TextBlock
-        {
-            Margin = new Thickness(0, 8, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Foreground = CloneBrushResource(isSelected ? "IslandTextBrush" : "IslandMutedTextBrush", Brushes.White),
-            Text = $"Preset {index + 1}",
-        };
-
         var button = new Button
         {
+            Width = 112,
+            Height = 70,
+            Padding = new Thickness(0),
             Tag = preset.Id,
-            Width = 150,
-            Margin = new Thickness(0, 0, 10, 10),
-            Padding = new Thickness(10),
-            Background = CloneBrushResource(isSelected ? "IslandButtonActiveBrush" : "SecondaryButtonBrush", Brushes.Transparent),
-            BorderBrush = CloneBrushResource(isSelected ? "IslandButtonActiveBorderBrush" : "SecondaryButtonBorderBrush", Brushes.Transparent),
-            BorderThickness = new Thickness(1),
+            Background = Brushes.Transparent,
+            BorderBrush = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
             Cursor = Cursors.Hand,
-            Content = new StackPanel
-            {
-                Children =
-                {
-                    previewBorder,
-                    label,
-                },
-            },
+            ToolTip = "Apply preset",
+            Content = previewHost,
         };
 
         button.Click += ArrowPresetOption_Click;
-        return button;
+
+        var deleteButton = new Button
+        {
+            Width = 22,
+            Height = 22,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 2, 2, 0),
+            Tag = preset.Id,
+            ToolTip = "Delete preset",
+            Content = new TextBlock
+            {
+                FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+                FontSize = 10,
+                Text = "\uE74D",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        if (TryFindResource("EditorDeleteIconButtonStyle") is Style deleteButtonStyle)
+        {
+            deleteButton.Style = deleteButtonStyle;
+        }
+
+        if (deleteButton.Content is TextBlock deleteIcon)
+        {
+            deleteIcon.SetResourceReference(TextBlock.ForegroundProperty, "DeleteButtonForegroundBrush");
+        }
+
+        deleteButton.Click += DeleteArrowPresetButton_Click;
+
+        return new Grid
+        {
+            Width = 112,
+            Height = 78,
+            Margin = new Thickness(0, 0, 8, 8),
+            Children =
+            {
+                button,
+                deleteButton,
+            },
+        };
+    }
+
+    private void DeleteArrowPresetButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string presetId })
+        {
+            return;
+        }
+
+        var removed = _arrowShapePresets.RemoveAll(candidate => string.Equals(candidate.Id, presetId, StringComparison.Ordinal)) > 0;
+        if (!removed)
+        {
+            return;
+        }
+
+        if (string.Equals(_selectedArrowPresetId, presetId, StringComparison.Ordinal))
+        {
+            ClearSelectedArrowPreset();
+        }
+
+        PersistEditorPreferences();
+        UpdateArrowPresetButtonLabel();
+        RebuildArrowPresetButtons();
+        e.Handled = true;
     }
 
     private void UpdateArrowPresetButtonLabel()
@@ -1441,6 +2112,9 @@ public partial class EditorWindow : Window
                 HeadScale: arrow.HeadScale,
                 ShadowStrength: arrow.ShadowStrength,
                 BorderWidth: arrow.BorderWidth,
+                HasStartHead: arrow.HasStartHead,
+                HasEndHead: arrow.HasEndHead,
+                TailHeadScale: arrow.TailHeadScale,
                 BendPoints: CreateRelativeArrowPresetPoints(arrow));
         }
 
@@ -1452,6 +2126,9 @@ public partial class EditorWindow : Window
             HeadScale: _lastArrowHeadScale,
             ShadowStrength: _lastArrowShadowStrength,
             BorderWidth: _lastArrowBorderWidth,
+            HasStartHead: _lastArrowHasStartHead,
+            HasEndHead: _lastArrowHasEndHead,
+            TailHeadScale: _lastArrowTailHeadScale,
             BendPoints: _lastArrowRelativeBendPoints.Select(point => new ArrowPresetPointPreference(point.U, point.V)).ToList());
     }
 
@@ -1462,8 +2139,11 @@ public partial class EditorWindow : Window
         _lastArrowBodyScale = Math.Clamp(preset.BodyScale, 0.15, 3.0);
         _lastArrowFrontScale = Math.Clamp(preset.FrontScale, 0.15, 3.0);
         _lastArrowHeadScale = Math.Clamp(preset.HeadScale, 0.2, 1.6);
+        _lastArrowTailHeadScale = Math.Clamp(preset.TailHeadScale ?? 1.0, 0.2, 1.6);
         _lastArrowShadowStrength = Math.Clamp(preset.ShadowStrength, 0, 1);
         _lastArrowBorderWidth = Math.Clamp(preset.BorderWidth, 0, 12);
+        _lastArrowHasStartHead = preset.HasStartHead == true;
+        _lastArrowHasEndHead = preset.HasEndHead ?? true;
         _lastArrowRelativeBendPoints = (preset.BendPoints ?? [])
             .Select(point => (point.U, point.V))
             .ToList();
@@ -1489,14 +2169,17 @@ public partial class EditorWindow : Window
 
     private static ArrowAnnotation CreateArrowPresetPreview(ArrowShapePresetPreference preset)
     {
-        var arrow = ArrowAnnotation.Create(new Point(12, 30));
-        arrow.End = new Point(100, 30);
+        var arrow = ArrowAnnotation.Create(new Point(4, 33));
+        arrow.End = new Point(104, 33);
         arrow.SetTailScale(preset.TailScale);
         arrow.SetBodyScale(preset.BodyScale);
         arrow.SetFrontScale(preset.FrontScale);
         arrow.SetHeadScale(preset.HeadScale);
+        arrow.SetTailHeadScale(preset.TailHeadScale ?? 1.0);
         arrow.SetShadowStrength(preset.ShadowStrength);
         arrow.SetBorderWidth(preset.BorderWidth);
+        arrow.SetStartHeadEnabled(preset.HasStartHead == true);
+        arrow.SetEndHeadEnabled(preset.HasEndHead ?? true);
 
         var bendPoints = preset.BendPoints ?? [];
         var length = arrow.End.X - arrow.Start.X;
@@ -1549,11 +2232,17 @@ public partial class EditorWindow : Window
         TextSizePanel.Visibility = visibility;
         TextBackgroundOpacityPanel.Visibility = visibility;
         TextBackgroundStrengthPanel.Visibility = visibility;
+        TextAlignmentPanel.Visibility = visibility;
 
         if (textAnnotation is null)
         {
             return;
         }
+
+        _isUpdatingTextFontSize = true;
+        TextFontSizeSlider.Value = textAnnotation.FontSize;
+        TextFontSizeValueText.Text = textAnnotation.FontSize.ToString("0", CultureInfo.InvariantCulture);
+        _isUpdatingTextFontSize = false;
 
         _isUpdatingTextBackgroundOpacity = true;
         var opacityPercent = Math.Round(textAnnotation.BackgroundOpacity * 100);
@@ -1566,6 +2255,51 @@ public partial class EditorWindow : Window
         TextBackgroundStrengthSlider.Value = strengthPercent;
         TextBackgroundStrengthValueText.Text = $"{(int)strengthPercent}%";
         _isUpdatingTextBackgroundStrength = false;
+
+        _isUpdatingTextAlignment = true;
+        TextAlignLeftButton.IsChecked = textAnnotation.TextAlignment == System.Windows.TextAlignment.Left;
+        TextAlignCenterButton.IsChecked = textAnnotation.TextAlignment == System.Windows.TextAlignment.Center;
+        TextAlignRightButton.IsChecked = textAnnotation.TextAlignment == System.Windows.TextAlignment.Right;
+        TextBoldButton.IsChecked = textAnnotation.IsBold;
+        _isUpdatingTextAlignment = false;
+    }
+
+    private void UpdateObjectStyleControls(AnnotationBase? annotation)
+    {
+        var styleAnnotation = annotation is ArrowAnnotation ? null : annotation as IBorderShadowAnnotation;
+        ObjectStylePanel.Visibility = styleAnnotation is null ? Visibility.Collapsed : Visibility.Visible;
+        if (styleAnnotation is null)
+        {
+            return;
+        }
+
+        _isUpdatingObjectShadowStrength = true;
+        var shadowPercent = Math.Round(styleAnnotation.ShadowStrength * 100);
+        ObjectShadowSlider.Value = shadowPercent;
+        ObjectShadowValueLabel.Text = $"{(int)shadowPercent}%";
+        _isUpdatingObjectShadowStrength = false;
+
+        _isUpdatingObjectBorderWidth = true;
+        ObjectBorderSlider.Value = styleAnnotation.BorderWidth;
+        ObjectBorderValueLabel.Text = styleAnnotation.BorderWidth.ToString("0.0", CultureInfo.InvariantCulture);
+        _isUpdatingObjectBorderWidth = false;
+    }
+
+    private void UpdateHighlightAnnotationControls(HighlightAnnotation? highlightAnnotation)
+    {
+        var visibility = highlightAnnotation is null ? Visibility.Collapsed : Visibility.Visible;
+        HighlightStrengthPanel.Visibility = visibility;
+
+        if (highlightAnnotation is null)
+        {
+            return;
+        }
+
+        _isUpdatingHighlightStrength = true;
+        var strengthPercent = Math.Round(highlightAnnotation.ColorStrength * 100);
+        HighlightStrengthSlider.Value = strengthPercent;
+        HighlightStrengthValueText.Text = $"{(int)strengthPercent}%";
+        _isUpdatingHighlightStrength = false;
     }
 
     private void UpdateObscureAnnotationControls(ObscureAnnotation? obscureAnnotation)
@@ -1625,9 +2359,10 @@ public partial class EditorWindow : Window
         SelectToolButton.IsChecked = true;
     }
 
-    private static bool IsDeferredDrawTool(EditorTool tool)
+    private bool IsDeferredDrawTool(EditorTool tool)
     {
-        return tool is EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Arrow or EditorTool.Obscure;
+        return tool is EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Arrow or EditorTool.Obscure
+            || (tool == EditorTool.Highlight && _lastHighlightMode != HighlightMode.Freehand);
     }
 
     private void BeginDeferredDraw(EditorTool tool, Point point)
@@ -1671,6 +2406,17 @@ public partial class EditorWindow : Window
                 _dragOperation = DragOperation.Draw;
                 break;
             }
+            case EditorTool.Highlight:
+            {
+                var annotation = _lastHighlightMode == HighlightMode.Line
+                    ? HighlightAnnotation.CreateLine(point)
+                    : HighlightAnnotation.CreateRegion(point);
+                ApplyLastUsedHighlightStyle(annotation);
+                _annotations.Add(annotation);
+                _selectedAnnotation = annotation;
+                _dragOperation = DragOperation.Draw;
+                break;
+            }
         }
     }
 
@@ -1680,6 +2426,8 @@ public partial class EditorWindow : Window
         textAnnotation.SetFontSize(_lastTextFontSize);
         textAnnotation.SetBackgroundOpacity(_lastTextBackgroundOpacity);
         textAnnotation.SetBackgroundColorStrength(_lastTextBackgroundStrength);
+        textAnnotation.SetTextAlignment(_lastTextAlignment);
+        textAnnotation.SetBold(_lastTextIsBold);
     }
 
     private void ApplyLastUsedArrowStyle(ArrowAnnotation arrowAnnotation)
@@ -1689,9 +2437,18 @@ public partial class EditorWindow : Window
         arrowAnnotation.SetBodyScale(_lastArrowBodyScale);
         arrowAnnotation.SetFrontScale(_lastArrowFrontScale);
         arrowAnnotation.SetHeadScale(_lastArrowHeadScale);
+        arrowAnnotation.SetTailHeadScale(_lastArrowTailHeadScale);
         arrowAnnotation.SetShadowStrength(_lastArrowShadowStrength);
         arrowAnnotation.SetBorderWidth(_lastArrowBorderWidth);
+        arrowAnnotation.SetStartHeadEnabled(_lastArrowHasStartHead);
+        arrowAnnotation.SetEndHeadEnabled(_lastArrowHasEndHead);
         ApplyLastUsedArrowBendPoints(arrowAnnotation);
+    }
+
+    private void ApplyLastUsedHighlightStyle(HighlightAnnotation highlightAnnotation)
+    {
+        highlightAnnotation.SetColor(_lastHighlightColor);
+        highlightAnnotation.SetColorStrength(_lastHighlightStrength);
     }
 
     private void ApplyLastUsedArrowBendPoints(ArrowAnnotation arrowAnnotation)
@@ -1726,8 +2483,11 @@ public partial class EditorWindow : Window
         _lastArrowBodyScale = arrow.BodyScale;
         _lastArrowFrontScale = arrow.FrontScale;
         _lastArrowHeadScale = arrow.HeadScale;
+        _lastArrowTailHeadScale = arrow.TailHeadScale;
         _lastArrowShadowStrength = arrow.ShadowStrength;
         _lastArrowBorderWidth = arrow.BorderWidth;
+        _lastArrowHasStartHead = arrow.HasStartHead;
+        _lastArrowHasEndHead = arrow.HasEndHead;
 
         if (!preserveSelectedPreset)
         {
@@ -1792,7 +2552,14 @@ public partial class EditorWindow : Window
                 continue;
             }
 
-            annotation.Render(AnnotationCanvas, annotation == _selectedAnnotation, annotation == _hoveredAnnotation);
+            if (annotation is HighlightAnnotation highlightAnnotation)
+            {
+                highlightAnnotation.Render(AnnotationCanvas, annotation == _selectedAnnotation, annotation == _hoveredAnnotation, _workingImage);
+            }
+            else
+            {
+                annotation.Render(AnnotationCanvas, annotation == _selectedAnnotation, annotation == _hoveredAnnotation);
+            }
         }
 
         if (_cropSelection is { } cropSelection)
@@ -1816,22 +2583,19 @@ public partial class EditorWindow : Window
 
     private IEnumerable<AnnotationBase> GetAnnotationsInRenderOrder()
     {
-        return _annotations
-            .Where(annotation => annotation is ObscureAnnotation)
-            .Concat(_annotations.Where(annotation => annotation is not ObscureAnnotation));
+        return _annotations;
     }
 
     private IEnumerable<AnnotationBase> GetAnnotationsInHitTestOrder()
     {
-        return _annotations
-            .Where(annotation => annotation is not ObscureAnnotation)
-            .Reverse()
-            .Concat(_annotations.Where(annotation => annotation is ObscureAnnotation).Reverse());
+        return _annotations.AsEnumerable().Reverse();
     }
 
     private bool ShouldConstrainAspectRatio()
     {
-        return Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && (_selectedAnnotation is RectangleAnnotation or EllipseAnnotation or ObscureAnnotation);
+        return Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)
+            && (_selectedAnnotation is RectangleAnnotation or EllipseAnnotation or ObscureAnnotation
+                or HighlightAnnotation { Mode: HighlightMode.Region });
     }
 
     private void ApplyWorkingImage(BitmapSource bitmapSource)
@@ -1926,6 +2690,7 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Crop || _editingTextAnnotation is not null || _selectedAnnotation is null)
         {
             SelectionActionIsland.Visibility = Visibility.Collapsed;
+            LayerActionsIsland.Visibility = Visibility.Collapsed;
             DeleteActionPanel.Opacity = 1;
             DeleteActionPanel.IsHitTestVisible = true;
             UpdateSelectionAnnotationControls(null);
@@ -1937,6 +2702,15 @@ public partial class EditorWindow : Window
         DeleteActionPanel.Opacity = 1;
         DeleteActionPanel.IsHitTestVisible = true;
         UpdateSelectionAnnotationControls(_selectedAnnotation);
+        UpdateLayerActionIsland();
+
+        if (ReferenceEquals(SelectionActionIsland.Parent, EditorFooterStack))
+        {
+            SelectionActionIslandTransform.X = 0;
+            SelectionActionIslandTransform.Y = 0;
+            SelectionActionIsland.Visibility = Visibility.Visible;
+            return;
+        }
 
         SelectionActionIsland.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         ToolbarIsland.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -1944,9 +2718,8 @@ public partial class EditorWindow : Window
         var islandHeight = SelectionActionIsland.DesiredSize.Height;
         var toolbarWidth = ToolbarIsland.DesiredSize.Width;
         var toolbarHeight = ToolbarIsland.DesiredSize.Height;
-        var viewportWidth = ArtworkScrollViewer.ViewportWidth > 0 ? ArtworkScrollViewer.ViewportWidth : ArtworkScrollViewer.ActualWidth;
-        var viewportHeight = ArtworkScrollViewer.ViewportHeight > 0 ? ArtworkScrollViewer.ViewportHeight : ArtworkScrollViewer.ActualHeight;
-        var viewportOrigin = ArtworkScrollViewer.TranslatePoint(new Point(0, 0), EditorRootGrid);
+        var viewportWidth = EditorRootGrid.ActualWidth;
+        var viewportHeight = EditorRootGrid.ActualHeight;
         var toolbarOrigin = ToolbarIsland.TranslatePoint(new Point(0, 0), EditorRootGrid);
 
         if (viewportWidth <= 0 || viewportHeight <= 0 || toolbarWidth <= 0 || toolbarHeight <= 0)
@@ -1958,16 +2731,35 @@ public partial class EditorWindow : Window
         var targetX = toolbarOrigin.X + ((toolbarWidth - islandWidth) / 2);
 
         var targetY = toolbarOrigin.Y - islandHeight - SelectionActionIslandSpacing;
-        var minX = viewportOrigin.X + SelectionActionIslandViewportPadding;
-        var maxX = viewportOrigin.X + viewportWidth - islandWidth - SelectionActionIslandViewportPadding;
-        var minY = viewportOrigin.Y + SelectionActionIslandViewportPadding;
-        var boundedMaxY = viewportOrigin.Y + viewportHeight - islandHeight - SelectionActionIslandViewportPadding;
+        var minX = SelectionActionIslandViewportPadding;
+        var maxX = viewportWidth - islandWidth - SelectionActionIslandViewportPadding;
+        var minY = SelectionActionIslandViewportPadding;
         targetX = Math.Clamp(targetX, minX, Math.Max(minX, maxX));
-        targetY = Math.Clamp(targetY, minY, Math.Max(minY, boundedMaxY));
+        targetY = Math.Max(minY, targetY);
 
         SelectionActionIslandTransform.X = targetX;
         SelectionActionIslandTransform.Y = targetY;
         SelectionActionIsland.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateLayerActionIsland()
+    {
+        if (_currentTool == EditorTool.Crop || _editingTextAnnotation is not null || _selectedAnnotation is null)
+        {
+            LayerActionsIsland.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var selectedIndex = _annotations.IndexOf(_selectedAnnotation);
+        var hasSelectionInStack = selectedIndex >= 0;
+        var canMoveDown = hasSelectionInStack && selectedIndex > 0;
+        var canMoveUp = hasSelectionInStack && selectedIndex < _annotations.Count - 1;
+
+        LayerActionsIsland.Visibility = Visibility.Visible;
+        LayerTopButton.IsEnabled = canMoveUp;
+        LayerUpButton.IsEnabled = canMoveUp;
+        LayerDownButton.IsEnabled = canMoveDown;
+        LayerBottomButton.IsEnabled = canMoveDown;
     }
 
     private Rect ToOverlayRect(Rect documentRect)
@@ -2020,6 +2812,22 @@ public partial class EditorWindow : Window
         if (!InlineTextEditor.FontSize.Equals(_editingTextAnnotation.FontSize))
         {
             InlineTextEditor.FontSize = _editingTextAnnotation.FontSize;
+        }
+
+        if (!InlineTextEditor.Width.Equals(_editingTextAnnotation.BoxWidth))
+        {
+            InlineTextEditor.Width = _editingTextAnnotation.BoxWidth;
+        }
+
+        if (InlineTextEditor.TextAlignment != _editingTextAnnotation.TextAlignment)
+        {
+            InlineTextEditor.TextAlignment = _editingTextAnnotation.TextAlignment;
+        }
+
+        var expectedFontWeight = _editingTextAnnotation.IsBold ? FontWeights.Bold : FontWeights.Normal;
+        if (InlineTextEditor.FontWeight != expectedFontWeight)
+        {
+            InlineTextEditor.FontWeight = expectedFontWeight;
         }
 
         InlineTextEditorBorder.Background = AnnotationBase.MakeBrush(_editingTextAnnotation.GetBackgroundTint(isHovered: true));
@@ -2076,8 +2884,40 @@ public partial class EditorWindow : Window
     {
         var roundedWidth = Math.Max(1, (int)Math.Round(width));
         var roundedHeight = Math.Max(1, (int)Math.Round(height));
-        ImageDimensionsText.Text = $"{roundedWidth} x {roundedHeight}";
-        ToolTipService.SetToolTip(ImageDimensionsText, $"Current artwork dimensions: {roundedWidth} x {roundedHeight} pixels");
+        var fileSizeLabel = GetDisplayedImageFileSizeLabel();
+        ImageDimensionsText.Text = $"{roundedWidth} x {roundedHeight} | {fileSizeLabel}";
+        ToolTipService.SetToolTip(ImageDimensionsText, $"Current artwork dimensions: {roundedWidth} x {roundedHeight} pixels. Estimated PNG size: {fileSizeLabel}.");
+    }
+
+    private string GetDisplayedImageFileSizeLabel()
+    {
+        if (BaseImage.Source is not BitmapSource sourceBitmap)
+        {
+            return "0 B";
+        }
+
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(sourceBitmap));
+
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return FormatFileSize(stream.Length);
+    }
+
+    private static string FormatFileSize(long byteCount)
+    {
+        string[] suffixes = ["B", "KB", "MB", "GB"];
+        double size = byteCount;
+        var suffixIndex = 0;
+
+        while (size >= 1024 && suffixIndex < suffixes.Length - 1)
+        {
+            size /= 1024;
+            suffixIndex++;
+        }
+
+        var decimals = suffixIndex == 0 ? 0 : 1;
+        return $"{size.ToString($"F{decimals}", CultureInfo.InvariantCulture)} {suffixes[suffixIndex]}";
     }
 
     private void FitWindowToArtwork()
@@ -2547,6 +3387,36 @@ public partial class EditorWindow : Window
         return new Rect(new Point(left, top), new Point(right, bottom));
     }
 
+    private void ClampSelectedObscureAnnotationToCanvas(bool preserveSize)
+    {
+        if (_selectedAnnotation is ObscureAnnotation obscureAnnotation)
+        {
+            ClampObscureAnnotationToCanvas(obscureAnnotation, preserveSize);
+        }
+    }
+
+    private void ClampObscureAnnotationToCanvas(ObscureAnnotation obscureAnnotation, bool preserveSize)
+    {
+        var canvasBounds = new Rect(0, 0, _workingImage.PixelWidth, _workingImage.PixelHeight);
+        var normalized = new Rect(obscureAnnotation.Bounds.TopLeft, obscureAnnotation.Bounds.BottomRight);
+
+        if (preserveSize)
+        {
+            var width = Math.Min(normalized.Width, canvasBounds.Width);
+            var height = Math.Min(normalized.Height, canvasBounds.Height);
+            var left = Math.Clamp(normalized.Left, canvasBounds.Left, canvasBounds.Right - width);
+            var top = Math.Clamp(normalized.Top, canvasBounds.Top, canvasBounds.Bottom - height);
+            obscureAnnotation.Bounds = new Rect(left, top, width, height);
+            return;
+        }
+
+        var clipped = Rect.Intersect(normalized, canvasBounds);
+        if (!clipped.IsEmpty)
+        {
+            obscureAnnotation.Bounds = clipped;
+        }
+    }
+
     private enum EditorTool
     {
         Select,
@@ -2555,7 +3425,16 @@ public partial class EditorWindow : Window
         Rectangle,
         Ellipse,
         Obscure,
+        Highlight,
         Text,
+    }
+
+    private enum LayerMove
+    {
+        Top,
+        Up,
+        Down,
+        Bottom,
     }
 
     private enum DragOperation
@@ -2597,11 +3476,12 @@ public partial class EditorWindow : Window
     {
         return annotation switch
         {
-            RectangleAnnotation rectangle => $"rect:{RectToSignature(rectangle.Bounds)}:{ColorToSignature(rectangle.StrokeColor)}",
-            EllipseAnnotation ellipse => $"ellipse:{RectToSignature(ellipse.Bounds)}:{ColorToSignature(ellipse.StrokeColor)}",
-            TextAnnotation text => $"text:{PointToSignature(text.Location)}:{FormatDouble(text.FontSize)}:{FormatDouble(text.BackgroundOpacity)}:{FormatDouble(text.BackgroundColorStrength)}:{ColorToSignature(text.TextColor)}:{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text.Text ?? string.Empty))}",
-            ObscureAnnotation obscure => $"obscure:{RectToSignature(obscure.Bounds)}:{FormatDouble(obscure.BlurLevel)}:{FormatDouble(obscure.PixelationLevel)}:{FormatDouble(obscure.ColorStrength)}:{ColorToSignature(obscure.OverlayColor)}",
-            ArrowAnnotation arrow => $"arrow:{PointToSignature(arrow.Start)}:{PointToSignature(arrow.End)}:{string.Join(",", arrow.BendPoints.Select(PointToSignature))}:{FormatDouble(arrow.ShaftThickness)}:{FormatDouble(arrow.HeadLength)}:{FormatDouble(arrow.HeadWidth)}:{FormatDouble(arrow.OuterEdgeWidth)}:{FormatDouble(arrow.InnerEdgeWidth)}:{FormatDouble(arrow.TailSweep)}:{FormatDouble(arrow.HeadSkew)}:{FormatDouble(arrow.TailScale)}:{FormatDouble(arrow.BodyScale)}:{FormatDouble(arrow.FrontScale)}:{FormatDouble(arrow.HeadScale)}:{FormatDouble(arrow.ShadowStrength)}:{FormatDouble(arrow.BorderWidth)}:{ColorToSignature(arrow.StrokeColor)}:{arrow.Style}",
+            RectangleAnnotation rectangle => $"rect:{RectToSignature(rectangle.Bounds)}:{ColorToSignature(rectangle.StrokeColor)}:{FormatDouble(rectangle.ShadowStrength)}:{FormatDouble(rectangle.BorderWidth)}",
+            EllipseAnnotation ellipse => $"ellipse:{RectToSignature(ellipse.Bounds)}:{ColorToSignature(ellipse.StrokeColor)}:{FormatDouble(ellipse.ShadowStrength)}:{FormatDouble(ellipse.BorderWidth)}",
+            TextAnnotation text => $"text:{PointToSignature(text.Location)}:{FormatDouble(text.BoxWidth)}:{FormatDouble(text.FontSize)}:{FormatDouble(text.BackgroundOpacity)}:{FormatDouble(text.BackgroundColorStrength)}:{FormatDouble(text.ShadowStrength)}:{FormatDouble(text.BorderWidth)}:{ColorToSignature(text.TextColor)}:{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text.Text ?? string.Empty))}:{text.TextAlignment}:{text.IsBold}",
+            ObscureAnnotation obscure => $"obscure:{RectToSignature(obscure.Bounds)}:{FormatDouble(obscure.BlurLevel)}:{FormatDouble(obscure.PixelationLevel)}:{FormatDouble(obscure.ColorStrength)}:{FormatDouble(obscure.ShadowStrength)}:{FormatDouble(obscure.BorderWidth)}:{ColorToSignature(obscure.OverlayColor)}",
+            ArrowAnnotation arrow => $"arrow:{PointToSignature(arrow.Start)}:{PointToSignature(arrow.End)}:{string.Join(",", arrow.BendPoints.Select(PointToSignature))}:{FormatDouble(arrow.ShaftThickness)}:{FormatDouble(arrow.HeadLength)}:{FormatDouble(arrow.HeadWidth)}:{FormatDouble(arrow.OuterEdgeWidth)}:{FormatDouble(arrow.InnerEdgeWidth)}:{FormatDouble(arrow.TailSweep)}:{FormatDouble(arrow.HeadSkew)}:{FormatDouble(arrow.TailScale)}:{FormatDouble(arrow.BodyScale)}:{FormatDouble(arrow.FrontScale)}:{FormatDouble(arrow.HeadScale)}:{FormatDouble(arrow.TailHeadScale)}:{FormatDouble(arrow.ShadowStrength)}:{FormatDouble(arrow.BorderWidth)}:{arrow.HasStartHead}:{arrow.HasEndHead}:{ColorToSignature(arrow.StrokeColor)}:{arrow.Style}",
+            HighlightAnnotation highlight => $"highlight:{highlight.Mode}:{RectToSignature(highlight.Bounds)}:{string.Join(",", highlight.Points.Select(PointToSignature))}:{ColorToSignature(highlight.HighlightColor)}:{FormatDouble(highlight.ColorStrength)}:{FormatDouble(highlight.ShadowStrength)}:{FormatDouble(highlight.BorderWidth)}",
             _ => annotation.GetType().FullName ?? annotation.GetType().Name,
         };
     }
@@ -2637,6 +3517,10 @@ public partial class EditorWindow : Window
 
         _lastShapeColor = ParseColorOrDefault(preferences.ShapeColor, DefaultAccentColor);
         _lastArrowColor = ParseColorOrDefault(preferences.ArrowColor, DefaultArrowColor);
+        if (_lastArrowColor == LegacyDefaultArrowColor)
+        {
+            _lastArrowColor = DefaultArrowColor;
+        }
         _lastArrowStyle = ArrowStyle.BrushStroke;
         _arrowShapePresets.Clear();
         if (preferences.ArrowShapePresets is { Count: > 0 })
@@ -2650,6 +3534,15 @@ public partial class EditorWindow : Window
         _selectedArrowPresetId = _arrowShapePresets.Any(candidate => string.Equals(candidate.Id, preferences.SelectedArrowPresetId, StringComparison.Ordinal))
             ? preferences.SelectedArrowPresetId
             : null;
+        _lastArrowTailScale = Math.Clamp(preferences.ArrowTailScale ?? DefaultArrowTailScale, 0.15, 3.0);
+        _lastArrowBodyScale = Math.Clamp(preferences.ArrowBodyScale ?? DefaultArrowBodyScale, 0.15, 3.0);
+        _lastArrowFrontScale = Math.Clamp(preferences.ArrowFrontScale ?? DefaultArrowFrontScale, 0.15, 3.0);
+        _lastArrowHeadScale = Math.Clamp(preferences.ArrowHeadScale ?? DefaultArrowHeadScale, 0.2, 1.6);
+        _lastArrowShadowStrength = Math.Clamp(preferences.ArrowShadowStrength ?? DefaultArrowShadowStrength, 0, 1);
+        _lastArrowBorderWidth = Math.Clamp(preferences.ArrowBorderWidth ?? DefaultArrowBorderWidth, 0, 12);
+        _lastArrowHasStartHead = preferences.ArrowHasStartHead == true;
+        _lastArrowHasEndHead = preferences.ArrowHasEndHead ?? true;
+        _lastArrowTailHeadScale = Math.Clamp(preferences.ArrowTailHeadScale ?? DefaultArrowTailHeadScale, 0.2, 1.6);
         if (_selectedArrowPresetId is { } selectedPresetId)
         {
             var selectedPreset = _arrowShapePresets.First(candidate => string.Equals(candidate.Id, selectedPresetId, StringComparison.Ordinal));
@@ -2657,8 +3550,11 @@ public partial class EditorWindow : Window
             _lastArrowBodyScale = selectedPreset.BodyScale;
             _lastArrowFrontScale = selectedPreset.FrontScale;
             _lastArrowHeadScale = selectedPreset.HeadScale;
+            _lastArrowTailHeadScale = Math.Clamp(selectedPreset.TailHeadScale ?? 1.0, 0.2, 1.6);
             _lastArrowShadowStrength = selectedPreset.ShadowStrength;
             _lastArrowBorderWidth = selectedPreset.BorderWidth;
+            _lastArrowHasStartHead = selectedPreset.HasStartHead == true;
+            _lastArrowHasEndHead = selectedPreset.HasEndHead ?? true;
             _lastArrowRelativeBendPoints = (selectedPreset.BendPoints ?? [])
                 .Select(point => (point.U, point.V))
                 .ToList();
@@ -2668,6 +3564,7 @@ public partial class EditorWindow : Window
         _lastTextFontSize = preferences.TextFontSize > 0 ? preferences.TextFontSize : DefaultTextFontSize;
         _lastTextBackgroundOpacity = Math.Clamp(preferences.TextBackgroundOpacity, 0, 1);
         _lastTextBackgroundStrength = Math.Clamp(preferences.TextBackgroundStrength, 0, 1);
+        _lastHighlightStrength = Math.Clamp(preferences.HighlightStrength ?? DefaultHighlightStrength, 0, 1);
         var hasObscureColorStrengthPreference = preferences.ObscureColorStrength.HasValue;
         var savedObscureColor = ParseColorOrDefault(preferences.ObscureColor, DefaultObscureColor);
         _lastObscureColor = !hasObscureColorStrengthPreference && savedObscureColor == Color.FromRgb(17, 24, 39)
@@ -2703,10 +3600,20 @@ public partial class EditorWindow : Window
             ArrowStyle: _lastArrowStyle.ToString(),
             ArrowShapePresets: _arrowShapePresets.Select(NormalizeArrowPreset).ToList(),
             SelectedArrowPresetId: _selectedArrowPresetId,
+            ArrowTailScale: _lastArrowTailScale,
+            ArrowBodyScale: _lastArrowBodyScale,
+            ArrowFrontScale: _lastArrowFrontScale,
+            ArrowHeadScale: _lastArrowHeadScale,
+            ArrowShadowStrength: _lastArrowShadowStrength,
+            ArrowBorderWidth: _lastArrowBorderWidth,
+            ArrowHasStartHead: _lastArrowHasStartHead,
+            ArrowHasEndHead: _lastArrowHasEndHead,
+            ArrowTailHeadScale: _lastArrowTailHeadScale,
             TextColor: ToPreferenceColor(_lastTextColor),
             TextFontSize: _lastTextFontSize,
             TextBackgroundOpacity: _lastTextBackgroundOpacity,
             TextBackgroundStrength: _lastTextBackgroundStrength,
+            HighlightStrength: _lastHighlightStrength,
             ObscureColor: ToPreferenceColor(_lastObscureColor),
                 ObscureMode: _lastObscureMode.ToString(),
                 ObscureColorStrength: _lastObscureColorStrength,
@@ -2737,6 +3644,9 @@ public partial class EditorWindow : Window
             HeadScale: Math.Clamp(preset.HeadScale, 0.2, 1.6),
             ShadowStrength: Math.Clamp(preset.ShadowStrength, 0, 1),
             BorderWidth: Math.Clamp(preset.BorderWidth, 0, 12),
+            HasStartHead: preset.HasStartHead == true,
+            HasEndHead: preset.HasEndHead ?? true,
+            TailHeadScale: Math.Clamp(preset.TailHeadScale ?? 1.0, 0.2, 1.6),
             BendPoints: (preset.BendPoints ?? [])
                 .Select(point => new ArrowPresetPointPreference(point.U, point.V))
                 .ToList());
@@ -2787,6 +3697,11 @@ public partial class EditorWindow : Window
         Color ScrollBarThumb,
         Color ScrollBarThumbHover,
         Color ScrollBarThumbPressed,
+        Color SliderTrack,
+        Color SliderFill,
+        Color SliderFillHover,
+        Color SliderThumb,
+        Color SliderThumbBorder,
         Color GlowStart,
         Color GlowMiddle,
         Color GlowEnd)
@@ -2829,6 +3744,11 @@ public partial class EditorWindow : Window
             ScrollBarThumb: Color.FromArgb(0x76, 0x86, 0x93, 0xA2),
             ScrollBarThumbHover: Color.FromArgb(0x9A, 0xA1, 0xAD, 0xBA),
             ScrollBarThumbPressed: Color.FromArgb(0xC0, 0xB7, 0xC3, 0xCF),
+            SliderTrack: Color.FromRgb(0x30, 0x33, 0x3A),
+            SliderFill: Color.FromRgb(0x1A, 0xA9, 0xD8),
+            SliderFillHover: Color.FromRgb(0x34, 0xBC, 0xE6),
+            SliderThumb: Colors.White,
+            SliderThumbBorder: Color.FromArgb(0x26, 0x00, 0x00, 0x00),
             GlowStart: Color.FromArgb(0x44, 0xFF, 0xB8, 0x6C),
             GlowMiddle: Color.FromArgb(0x14, 0xFF, 0x7A, 0x00),
             GlowEnd: Color.FromArgb(0x00, 0x00, 0x00, 0x00));
@@ -2863,14 +3783,19 @@ public partial class EditorWindow : Window
             InlineTextInputForeground: Color.FromRgb(0x1D, 0x26, 0x31),
             PopupPanelBackground: Color.FromArgb(0xFA, 0xFF, 0xFF, 0xFF),
             PopupPanelBorder: Color.FromArgb(0xCC, 0xD5, 0xE0, 0xEA),
-            DeleteButtonBackground: Color.FromArgb(0x1F, 0xD9, 0x48, 0x41),
-            DeleteButtonBorder: Color.FromArgb(0x6A, 0xE0, 0x89, 0x84),
-            DeleteButtonForeground: Color.FromRgb(0x9C, 0x2E, 0x2C),
+            DeleteButtonBackground: Color.FromRgb(0xFE, 0xEA, 0xEA),
+            DeleteButtonBorder: Color.FromRgb(0xF2, 0xB8, 0xB5),
+            DeleteButtonForeground: Color.FromRgb(0xB4, 0x23, 0x2E),
             IslandDivider: Color.FromArgb(0xCC, 0xD5, 0xE0, 0xEA),
             ScrollBarTrack: Color.FromArgb(0x18, 0x95, 0xA7, 0xB9),
             ScrollBarThumb: Color.FromArgb(0x82, 0x7C, 0x8A, 0x99),
             ScrollBarThumbHover: Color.FromArgb(0xA8, 0x62, 0x72, 0x84),
             ScrollBarThumbPressed: Color.FromArgb(0xD0, 0x4B, 0x5C, 0x70),
+            SliderTrack: Color.FromRgb(0xD8, 0xE1, 0xEA),
+            SliderFill: Color.FromRgb(0x16, 0xA7, 0xD6),
+            SliderFillHover: Color.FromRgb(0x0C, 0x8E, 0xC5),
+            SliderThumb: Colors.White,
+            SliderThumbBorder: Color.FromArgb(0x3A, 0x6F, 0x7D, 0x8B),
             GlowStart: Color.FromArgb(0x26, 0x69, 0xC2, 0xFF),
             GlowMiddle: Color.FromArgb(0x18, 0x8F, 0xD4, 0xBE),
             GlowEnd: Color.FromArgb(0x00, 0x00, 0x00, 0x00));
@@ -2890,6 +3815,24 @@ internal enum ArrowStyle
     Classic,
     Handdrawn,
     BrushStroke,
+}
+
+internal enum HighlightMode
+{
+    Region,
+    Line,
+    Freehand,
+}
+
+internal interface IBorderShadowAnnotation
+{
+    double ShadowStrength { get; }
+
+    double BorderWidth { get; }
+
+    void SetShadowStrength(double value);
+
+    void SetBorderWidth(double value);
 }
 
 internal abstract class AnnotationBase
@@ -3077,11 +4020,64 @@ internal abstract class AnnotationBase
         };
         canvas.Children.Add(light);
     }
+
+    protected static DropShadowEffect CreateStrongShadowEffect(double strength)
+    {
+        strength = Math.Clamp(strength, 0, 1);
+        return new DropShadowEffect
+        {
+            BlurRadius = 12 + (strength * 48),
+            ShadowDepth = 3 + (strength * 16),
+            Direction = 315,
+            Color = Colors.Black,
+            Opacity = 0.42 + (strength * 0.55),
+            RenderingBias = RenderingBias.Quality,
+        };
+    }
+
+    protected static void ApplyStrongShadow(FrameworkElement element, double strength)
+    {
+        if (strength <= 0.001)
+        {
+            element.Effect = null;
+            return;
+        }
+
+        element.Effect = CreateStrongShadowEffect(strength);
+    }
+
+    protected static void AddGeometryShadow(Canvas canvas, Geometry geometry, double strength)
+    {
+        if (strength <= 0.001)
+        {
+            return;
+        }
+
+        canvas.Children.Add(new ShapePath
+        {
+            Data = geometry,
+            Fill = MakeBrush(WithAlpha(Colors.Black, 44)),
+            IsHitTestVisible = false,
+            Effect = CreateStrongShadowEffect(strength),
+        });
+    }
+
+    protected static Color GetAutoBorderColor(Color color)
+    {
+        var brightness = ((0.2126 * color.R) + (0.7152 * color.G) + (0.0722 * color.B)) / 255d;
+        return brightness < 0.42
+            ? WithAlpha(Colors.White, 214)
+            : WithAlpha(Colors.Black, 185);
+    }
 }
 
-internal sealed class RectangleAnnotation : AnnotationBase
+internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotation
 {
     public Color StrokeColor { get; private set; } = EditorWindow.DefaultAccentColor;
+
+    public double ShadowStrength { get; private set; } = EditorWindow.DefaultShapeShadowStrength;
+
+    public double BorderWidth { get; private set; } = EditorWindow.DefaultShapeBorderWidth;
 
     public Rect Bounds { get; set; }
 
@@ -3096,10 +4092,11 @@ internal sealed class RectangleAnnotation : AnnotationBase
             Height = normalized.Height,
             RadiusX = 14,
             RadiusY = 14,
-            Stroke = strokeBrush,
+            Stroke = BorderWidth > 0.001 ? strokeBrush : Brushes.Transparent,
             Fill = fillBrush,
-            StrokeThickness = isSelected ? 5 : 4,
+            StrokeThickness = BorderWidth,
         };
+        ApplyStrongShadow(rectangle, ShadowStrength);
         Canvas.SetLeft(rectangle, normalized.Left);
         Canvas.SetTop(rectangle, normalized.Top);
         canvas.Children.Add(rectangle);
@@ -3170,6 +4167,16 @@ internal sealed class RectangleAnnotation : AnnotationBase
         StrokeColor = color;
     }
 
+    public void SetShadowStrength(double value)
+    {
+        ShadowStrength = Math.Clamp(value, 0, 1);
+    }
+
+    public void SetBorderWidth(double value)
+    {
+        BorderWidth = Math.Clamp(value, 0, 12);
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new RectangleAnnotation
@@ -3177,6 +4184,8 @@ internal sealed class RectangleAnnotation : AnnotationBase
             Bounds = Bounds,
         };
         clone.SetColor(StrokeColor);
+        clone.SetShadowStrength(ShadowStrength);
+        clone.SetBorderWidth(BorderWidth);
         return clone;
     }
 
@@ -3186,9 +4195,13 @@ internal sealed class RectangleAnnotation : AnnotationBase
     }
 }
 
-internal sealed class EllipseAnnotation : AnnotationBase
+internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotation
 {
     public Color StrokeColor { get; private set; } = EditorWindow.DefaultAccentColor;
+
+    public double ShadowStrength { get; private set; } = EditorWindow.DefaultShapeShadowStrength;
+
+    public double BorderWidth { get; private set; } = EditorWindow.DefaultShapeBorderWidth;
 
     public Rect Bounds { get; set; }
 
@@ -3200,10 +4213,11 @@ internal sealed class EllipseAnnotation : AnnotationBase
         {
             Width = normalized.Width,
             Height = normalized.Height,
-            Stroke = strokeBrush,
+            Stroke = BorderWidth > 0.001 ? strokeBrush : Brushes.Transparent,
             Fill = MakeBrush(WithAlpha(StrokeColor, (byte)(isHovered ? 26 : 10))),
-            StrokeThickness = isSelected ? 5 : 4,
+            StrokeThickness = BorderWidth,
         };
+        ApplyStrongShadow(ellipse, ShadowStrength);
         Canvas.SetLeft(ellipse, normalized.Left);
         Canvas.SetTop(ellipse, normalized.Top);
         canvas.Children.Add(ellipse);
@@ -3274,6 +4288,16 @@ internal sealed class EllipseAnnotation : AnnotationBase
         StrokeColor = color;
     }
 
+    public void SetShadowStrength(double value)
+    {
+        ShadowStrength = Math.Clamp(value, 0, 1);
+    }
+
+    public void SetBorderWidth(double value)
+    {
+        BorderWidth = Math.Clamp(value, 0, 12);
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new EllipseAnnotation
@@ -3281,6 +4305,8 @@ internal sealed class EllipseAnnotation : AnnotationBase
             Bounds = Bounds,
         };
         clone.SetColor(StrokeColor);
+        clone.SetShadowStrength(ShadowStrength);
+        clone.SetBorderWidth(BorderWidth);
         return clone;
     }
 
@@ -3290,9 +4316,11 @@ internal sealed class EllipseAnnotation : AnnotationBase
     }
 }
 
-internal sealed class TextAnnotation : AnnotationBase
+internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
 {
-    private const double MaxTextWidth = 340;
+    private const double DefaultBoxWidth = 340;
+    private const double MinBoxWidth = 64;
+    private const double HorizontalChromeWidth = 26;
 
     public Color TextColor { get; private set; } = EditorWindow.DefaultTextColor;
 
@@ -3302,9 +4330,29 @@ internal sealed class TextAnnotation : AnnotationBase
 
     public double BackgroundColorStrength { get; private set; } = EditorWindow.DefaultTextBackgroundStrength;
 
+    public double ShadowStrength { get; private set; } = EditorWindow.DefaultTextShadowStrength;
+
+    public double BorderWidth { get; private set; } = EditorWindow.DefaultTextBorderWidth;
+
+    public double BoxWidth { get; private set; } = DefaultBoxWidth;
+
     public Point Location { get; set; }
 
     public string Text { get; set; } = "Text";
+
+    public System.Windows.TextAlignment TextAlignment { get; private set; } = System.Windows.TextAlignment.Left;
+
+    public bool IsBold { get; private set; } = false;
+
+    public void SetTextAlignment(System.Windows.TextAlignment alignment)
+    {
+        TextAlignment = alignment;
+    }
+
+    public void SetBold(bool isBold)
+    {
+        IsBold = isBold;
+    }
 
     public override void Render(Canvas canvas, bool isSelected, bool isHovered)
     {
@@ -3323,6 +4371,7 @@ internal sealed class TextAnnotation : AnnotationBase
         if (isSelected)
         {
             AddHandle(canvas, Location);
+            AddHandle(canvas, new Point(Location.X + bounds.Width, Location.Y + bounds.Height));
         }
     }
 
@@ -3333,6 +4382,13 @@ internal sealed class TextAnnotation : AnnotationBase
 
     public override string? HitHandle(Point point)
     {
+        var bounds = MeasureBounds();
+        var resizePoint = new Point(Location.X + bounds.Width, Location.Y + bounds.Height);
+        if (Distance(resizePoint, point) <= 10)
+        {
+            return "Resize";
+        }
+
         return Distance(Location, point) <= 10 ? "Location" : null;
     }
 
@@ -3343,6 +4399,12 @@ internal sealed class TextAnnotation : AnnotationBase
 
     public override void MoveHandle(string handle, Point point, bool constrainToSquare)
     {
+        if (handle == "Resize")
+        {
+            SetBoxWidth(point.X - Location.X - HorizontalChromeWidth);
+            return;
+        }
+
         Location = point;
     }
 
@@ -3361,6 +4423,11 @@ internal sealed class TextAnnotation : AnnotationBase
         FontSize = fontSize;
     }
 
+    public void SetBoxWidth(double width)
+    {
+        BoxWidth = Math.Max(MinBoxWidth, width);
+    }
+
     public void SetBackgroundOpacity(double opacity)
     {
         BackgroundOpacity = Math.Clamp(opacity, 0, 1);
@@ -3369,6 +4436,16 @@ internal sealed class TextAnnotation : AnnotationBase
     public void SetBackgroundColorStrength(double strength)
     {
         BackgroundColorStrength = Math.Clamp(strength, 0, 1);
+    }
+
+    public void SetShadowStrength(double value)
+    {
+        ShadowStrength = Math.Clamp(value, 0, 1);
+    }
+
+    public void SetBorderWidth(double value)
+    {
+        BorderWidth = Math.Clamp(value, 0, 12);
     }
 
     internal Size GetBounds()
@@ -3384,9 +4461,14 @@ internal sealed class TextAnnotation : AnnotationBase
             Text = Text,
         };
         clone.SetColor(TextColor);
+        clone.SetBoxWidth(BoxWidth);
         clone.SetFontSize(FontSize);
         clone.SetBackgroundOpacity(BackgroundOpacity);
         clone.SetBackgroundColorStrength(BackgroundColorStrength);
+        clone.SetShadowStrength(ShadowStrength);
+        clone.SetBorderWidth(BorderWidth);
+        clone.SetTextAlignment(TextAlignment);
+        clone.SetBold(IsBold);
         return clone;
     }
 
@@ -3394,6 +4476,7 @@ internal sealed class TextAnnotation : AnnotationBase
     {
         var borderColor = isHovered ? Darken(TextColor, 0.18) : TextColor;
         var contentBorder = CreateContentBorder(isHovered, borderColor);
+        ApplyStrongShadow(contentBorder, ShadowStrength);
         contentBorder.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var bounds = contentBorder.DesiredSize;
         var grid = new Grid
@@ -3456,12 +4539,14 @@ internal sealed class TextAnnotation : AnnotationBase
             Background = MakeBrush(backgroundColor),
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(12, 8, 12, 8),
-            BorderThickness = new Thickness(isHovered ? 2 : 1),
-            BorderBrush = MakeBrush(frameColor),
+            BorderThickness = new Thickness(BorderWidth),
+            BorderBrush = BorderWidth > 0.001 ? MakeBrush(frameColor) : Brushes.Transparent,
             Child = new TextBlock
             {
                 Text = string.IsNullOrWhiteSpace(Text) ? " " : Text,
                 FontSize = FontSize,
+                FontWeight = IsBold ? FontWeights.Bold : FontWeights.Normal,
+                TextAlignment = TextAlignment,
                 Foreground = MakeBrush(foregroundColor),
                 Effect = new DropShadowEffect
                 {
@@ -3471,7 +4556,7 @@ internal sealed class TextAnnotation : AnnotationBase
                     Opacity = 1,
                 },
                 TextWrapping = TextWrapping.Wrap,
-                MaxWidth = MaxTextWidth,
+                Width = BoxWidth,
             },
         };
     }
@@ -3571,7 +4656,7 @@ internal sealed class TextAnnotation : AnnotationBase
     }
 }
 
-internal sealed class ObscureAnnotation : AnnotationBase
+internal sealed class ObscureAnnotation : AnnotationBase, IBorderShadowAnnotation
 {
     private const double CornerRadius = 3;
     private const double BaseBlurRadius = 2;
@@ -3584,6 +4669,10 @@ internal sealed class ObscureAnnotation : AnnotationBase
     public double PixelationLevel { get; private set; } = EditorWindow.DefaultObscurePixelationLevel;
 
     public double ColorStrength { get; private set; } = EditorWindow.DefaultObscureColorStrength;
+
+    public double ShadowStrength { get; private set; } = EditorWindow.DefaultObscureShadowStrength;
+
+    public double BorderWidth { get; private set; } = EditorWindow.DefaultObscureBorderWidth;
 
     public Rect Bounds { get; set; }
 
@@ -3678,6 +4767,16 @@ internal sealed class ObscureAnnotation : AnnotationBase
         ColorStrength = Math.Clamp(colorStrength, 0, 1);
     }
 
+    public void SetShadowStrength(double value)
+    {
+        ShadowStrength = Math.Clamp(value, 0, 1);
+    }
+
+    public void SetBorderWidth(double value)
+    {
+        BorderWidth = Math.Clamp(value, 0, 12);
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new ObscureAnnotation
@@ -3688,6 +4787,8 @@ internal sealed class ObscureAnnotation : AnnotationBase
         clone.SetBlurLevel(BlurLevel);
         clone.SetPixelationLevel(PixelationLevel);
         clone.SetColorStrength(ColorStrength);
+        clone.SetShadowStrength(ShadowStrength);
+        clone.SetBorderWidth(BorderWidth);
         return clone;
     }
 
@@ -3700,6 +4801,7 @@ internal sealed class ObscureAnnotation : AnnotationBase
             Clip = new RectangleGeometry(new Rect(0, 0, normalized.Width, normalized.Height), CornerRadius, CornerRadius),
             IsHitTestVisible = false,
         };
+        ApplyStrongShadow(grid, ShadowStrength);
 
         if (editorWindow?.CreatePixelatedObscureSource(normalized, PixelationLevel) is BitmapSource obscuredSource)
         {
@@ -3750,6 +4852,22 @@ internal sealed class ObscureAnnotation : AnnotationBase
             IsHitTestVisible = false,
         };
         grid.Children.Add(tint);
+
+        if (BorderWidth > 0.001)
+        {
+            grid.Children.Add(new Rectangle
+            {
+                Width = normalized.Width,
+                Height = normalized.Height,
+                RadiusX = CornerRadius,
+                RadiusY = CornerRadius,
+                Fill = Brushes.Transparent,
+                Stroke = MakeBrush(GetAutoBorderColor(OverlayColor)),
+                StrokeThickness = BorderWidth,
+                IsHitTestVisible = false,
+            });
+        }
+
         return grid;
     }
 
@@ -3765,7 +4883,558 @@ internal sealed class ObscureAnnotation : AnnotationBase
     }
 }
 
-internal sealed class ArrowAnnotation : AnnotationBase
+internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotation
+{
+    private const double RegionCornerRadius = 10;
+    private const double LineThickness = 24;
+    private const double FreehandThickness = 20;
+
+    public HighlightMode Mode { get; private set; } = HighlightMode.Region;
+
+    public Rect Bounds { get; set; }
+
+    public List<Point> Points { get; } = [];
+
+    public Color HighlightColor { get; private set; } = EditorWindow.DefaultHighlightColor;
+
+    public double ColorStrength { get; private set; } = EditorWindow.DefaultHighlightStrength;
+
+    public double ShadowStrength { get; private set; } = EditorWindow.DefaultHighlightShadowStrength;
+
+    public double BorderWidth { get; private set; } = EditorWindow.DefaultHighlightBorderWidth;
+
+    public static HighlightAnnotation CreateRegion(Point point)
+    {
+        return new HighlightAnnotation
+        {
+            Mode = HighlightMode.Region,
+            Bounds = new Rect(point, point),
+        };
+    }
+
+    public static HighlightAnnotation CreateLine(Point point)
+    {
+        var annotation = new HighlightAnnotation
+        {
+            Mode = HighlightMode.Line,
+        };
+        annotation.Points.Add(point);
+        annotation.Points.Add(point);
+        return annotation;
+    }
+
+    public static HighlightAnnotation CreateFreehand(Point point)
+    {
+        var annotation = new HighlightAnnotation
+        {
+            Mode = HighlightMode.Freehand,
+        };
+        annotation.Points.Add(point);
+        return annotation;
+    }
+
+    public override void Render(Canvas canvas, bool isSelected, bool isHovered)
+    {
+        RenderFlat(canvas, isSelected, isHovered);
+    }
+
+    public void Render(Canvas canvas, bool isSelected, bool isHovered, BitmapSource background)
+    {
+        var geometry = CreateFillGeometry();
+        if (geometry is null)
+        {
+            return;
+        }
+
+        var blendedHighlight = CreateBlendedHighlightImage(background, geometry, isHovered);
+        if (blendedHighlight is null)
+        {
+            RenderFlat(canvas, isSelected, isHovered);
+            return;
+        }
+
+        AddGeometryShadow(canvas, geometry, ShadowStrength);
+        canvas.Children.Add(blendedHighlight);
+        AddHighlightBorder(canvas, geometry);
+        RenderSelectionAdorners(canvas, isSelected, geometry);
+    }
+
+    private void RenderFlat(Canvas canvas, bool isSelected, bool isHovered)
+    {
+        switch (Mode)
+        {
+            case HighlightMode.Region:
+            {
+                var rect = Normalize(Bounds);
+                if (rect.Width < 0.5 || rect.Height < 0.5)
+                {
+                    return;
+                }
+
+                var fill = new Rectangle
+                {
+                    Width = rect.Width,
+                    Height = rect.Height,
+                    RadiusX = RegionCornerRadius,
+                    RadiusY = RegionCornerRadius,
+                    Fill = MakeBrush(GetFillColor(isHovered)),
+                    IsHitTestVisible = false,
+                };
+                ApplyStrongShadow(fill, ShadowStrength);
+                Canvas.SetLeft(fill, rect.Left);
+                Canvas.SetTop(fill, rect.Top);
+                canvas.Children.Add(fill);
+
+                if (BorderWidth > 0.001)
+                {
+                    var border = new Rectangle
+                    {
+                        Width = rect.Width,
+                        Height = rect.Height,
+                        RadiusX = RegionCornerRadius,
+                        RadiusY = RegionCornerRadius,
+                        Stroke = MakeBrush(GetAutoBorderColor(HighlightColor)),
+                        StrokeThickness = BorderWidth,
+                        Fill = Brushes.Transparent,
+                        IsHitTestVisible = false,
+                    };
+                    Canvas.SetLeft(border, rect.Left);
+                    Canvas.SetTop(border, rect.Top);
+                    canvas.Children.Add(border);
+                }
+
+                if (isSelected)
+                {
+                    AddMarchingAntsRectangle(canvas, rect, RegionCornerRadius, RegionCornerRadius);
+                    AddHandle(canvas, rect.TopLeft);
+                    AddHandle(canvas, rect.BottomRight);
+                }
+
+                break;
+            }
+            case HighlightMode.Line:
+            case HighlightMode.Freehand:
+            {
+                var geometry = CreateStrokeGeometry();
+                if (geometry is null)
+                {
+                    return;
+                }
+
+                AddGeometryShadow(canvas, geometry, ShadowStrength);
+                canvas.Children.Add(new ShapePath
+                {
+                    Data = geometry,
+                    Fill = MakeBrush(GetFillColor(isHovered)),
+                    IsHitTestVisible = false,
+                });
+                AddHighlightBorder(canvas, geometry);
+
+                if (isSelected)
+                {
+                    AddMarchingAntsPath(canvas, geometry);
+                    if (Mode == HighlightMode.Line && Points.Count >= 2)
+                    {
+                        AddHandle(canvas, Points[0]);
+                        AddHandle(canvas, Points[^1]);
+                    }
+                }
+
+                break;
+            }
+        }
+    }
+
+    private Geometry? CreateFillGeometry()
+    {
+        return Mode switch
+        {
+            HighlightMode.Region => CreateRegionGeometry(),
+            HighlightMode.Line or HighlightMode.Freehand => CreateStrokeGeometry(),
+            _ => null,
+        };
+    }
+
+    private Geometry? CreateRegionGeometry()
+    {
+        var rect = Normalize(Bounds);
+        if (rect.Width < 0.5 || rect.Height < 0.5)
+        {
+            return null;
+        }
+
+        return new RectangleGeometry(rect, RegionCornerRadius, RegionCornerRadius);
+    }
+
+    private void AddHighlightBorder(Canvas canvas, Geometry geometry)
+    {
+        if (BorderWidth <= 0.001)
+        {
+            return;
+        }
+
+        canvas.Children.Add(new ShapePath
+        {
+            Data = geometry,
+            Stroke = MakeBrush(GetAutoBorderColor(HighlightColor)),
+            StrokeThickness = BorderWidth,
+            StrokeLineJoin = PenLineJoin.Round,
+            Fill = Brushes.Transparent,
+            IsHitTestVisible = false,
+        });
+    }
+
+    private void RenderSelectionAdorners(Canvas canvas, bool isSelected, Geometry geometry)
+    {
+        if (!isSelected)
+        {
+            return;
+        }
+
+        if (Mode == HighlightMode.Region)
+        {
+            var rect = Normalize(Bounds);
+            AddMarchingAntsRectangle(canvas, rect, RegionCornerRadius, RegionCornerRadius);
+            AddHandle(canvas, rect.TopLeft);
+            AddHandle(canvas, rect.BottomRight);
+            return;
+        }
+
+        AddMarchingAntsPath(canvas, geometry);
+        if (Mode == HighlightMode.Line && Points.Count >= 2)
+        {
+            AddHandle(canvas, Points[0]);
+            AddHandle(canvas, Points[^1]);
+        }
+    }
+
+    private Image? CreateBlendedHighlightImage(BitmapSource background, Geometry geometry, bool isHovered)
+    {
+        var imageBounds = new Rect(0, 0, background.PixelWidth, background.PixelHeight);
+        var highlightBounds = Rect.Intersect(geometry.Bounds, imageBounds);
+        if (highlightBounds.IsEmpty || highlightBounds.Width < 1 || highlightBounds.Height < 1)
+        {
+            return null;
+        }
+
+        var left = Math.Clamp((int)Math.Floor(highlightBounds.Left), 0, Math.Max(0, background.PixelWidth - 1));
+        var top = Math.Clamp((int)Math.Floor(highlightBounds.Top), 0, Math.Max(0, background.PixelHeight - 1));
+        var right = Math.Clamp((int)Math.Ceiling(highlightBounds.Right), left + 1, background.PixelWidth);
+        var bottom = Math.Clamp((int)Math.Ceiling(highlightBounds.Bottom), top + 1, background.PixelHeight);
+        var width = right - left;
+        var height = bottom - top;
+        if (width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        var sourcePixels = CopyBackgroundPixels(background, new Int32Rect(left, top, width, height));
+        var maskPixels = CreateGeometryMaskPixels(geometry, left, top, width, height);
+        var blendedPixels = new byte[sourcePixels.Length];
+        var blendStrength = GetBlendStrength(isHovered);
+
+        for (var i = 0; i < sourcePixels.Length; i += 4)
+        {
+            var maskAlpha = maskPixels[i + 3];
+            if (maskAlpha == 0)
+            {
+                continue;
+            }
+
+            var baseBlue = sourcePixels[i];
+            var baseGreen = sourcePixels[i + 1];
+            var baseRed = sourcePixels[i + 2];
+            var targetRed = BlendHighlightChannel(baseRed, HighlightColor.R, blendStrength);
+            var targetGreen = BlendHighlightChannel(baseGreen, HighlightColor.G, blendStrength);
+            var targetBlue = BlendHighlightChannel(baseBlue, HighlightColor.B, blendStrength);
+
+            blendedPixels[i] = targetBlue;
+            blendedPixels[i + 1] = targetGreen;
+            blendedPixels[i + 2] = targetRed;
+            blendedPixels[i + 3] = maskAlpha;
+        }
+
+        var stride = width * 4;
+        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, blendedPixels, stride);
+        if (bitmap.CanFreeze)
+        {
+            bitmap.Freeze();
+        }
+
+        var image = new Image
+        {
+            Source = bitmap,
+            Width = width,
+            Height = height,
+            Stretch = Stretch.None,
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(image, left);
+        Canvas.SetTop(image, top);
+        return image;
+    }
+
+    private static byte[] CopyBackgroundPixels(BitmapSource background, Int32Rect sourceRect)
+    {
+        var converted = background.Format == PixelFormats.Bgra32
+            ? background
+            : new FormatConvertedBitmap(background, PixelFormats.Bgra32, null, 0);
+        var stride = sourceRect.Width * 4;
+        var pixels = new byte[stride * sourceRect.Height];
+        converted.CopyPixels(sourceRect, pixels, stride, 0);
+        return pixels;
+    }
+
+    private static byte[] CreateGeometryMaskPixels(Geometry geometry, int left, int top, int width, int height)
+    {
+        var visual = new DrawingVisual();
+        using (var context = visual.RenderOpen())
+        {
+            context.PushTransform(new TranslateTransform(-left, -top));
+            context.DrawGeometry(Brushes.White, null, geometry);
+            context.Pop();
+        }
+
+        var mask = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        mask.Render(visual);
+        var stride = width * 4;
+        var pixels = new byte[stride * height];
+        mask.CopyPixels(pixels, stride, 0);
+        return pixels;
+    }
+
+    private double GetBlendStrength(bool isHovered)
+    {
+        var strength = ColorStrength;
+        return Math.Clamp(strength + (isHovered ? 0.07 : 0), 0, 1);
+    }
+
+    private static byte BlendHighlightChannel(byte baseChannel, byte highlightChannel, double strength)
+    {
+        var multiply = baseChannel * highlightChannel / 255d;
+        return (byte)Math.Clamp(Math.Round(baseChannel + ((multiply - baseChannel) * strength)), 0, 255);
+    }
+
+    public override bool HitTest(Point point)
+    {
+        return Mode switch
+        {
+            HighlightMode.Region => Normalize(Bounds).Contains(point),
+            _ => CreateStrokeGeometry()?.FillContains(point) == true,
+        };
+    }
+
+    public override string? HitHandle(Point point)
+    {
+        if (Mode == HighlightMode.Region)
+        {
+            var rect = Normalize(Bounds);
+            if (Distance(rect.TopLeft, point) <= 14)
+            {
+                return "TopLeft";
+            }
+
+            if (Distance(rect.BottomRight, point) <= 14)
+            {
+                return "BottomRight";
+            }
+
+            return null;
+        }
+
+        if (Mode == HighlightMode.Line && Points.Count >= 2)
+        {
+            if (Distance(Points[0], point) <= 14)
+            {
+                return "Start";
+            }
+
+            if (Distance(Points[^1], point) <= 14)
+            {
+                return "End";
+            }
+        }
+
+        return null;
+    }
+
+    public override void Move(Vector delta)
+    {
+        if (Mode == HighlightMode.Region)
+        {
+            Bounds = new Rect(Bounds.TopLeft + delta, Bounds.BottomRight + delta);
+            return;
+        }
+
+        for (var i = 0; i < Points.Count; i++)
+        {
+            Points[i] = Points[i] + delta;
+        }
+    }
+
+    public override void MoveHandle(string handle, Point point, bool constrainToSquare)
+    {
+        switch (Mode)
+        {
+            case HighlightMode.Region:
+            {
+                var rect = Normalize(Bounds);
+                Bounds = handle switch
+                {
+                    "TopLeft" => CreateRectFromPoints(rect.BottomRight, point, constrainToSquare),
+                    "BottomRight" => CreateRectFromPoints(rect.TopLeft, point, constrainToSquare),
+                    _ => rect,
+                };
+                break;
+            }
+            case HighlightMode.Line when Points.Count >= 2:
+                if (handle == "Start")
+                {
+                    Points[0] = point;
+                }
+                else if (handle == "End")
+                {
+                    Points[^1] = point;
+                }
+                break;
+        }
+    }
+
+    public override void UpdateFromAnchor(Point anchor, Point current, bool constrainToSquare)
+    {
+        switch (Mode)
+        {
+            case HighlightMode.Region:
+                Bounds = CreateRectFromPoints(anchor, current, constrainToSquare);
+                break;
+            case HighlightMode.Line:
+                if (Points.Count == 0)
+                {
+                    Points.Add(anchor);
+                }
+                if (Points.Count == 1)
+                {
+                    Points.Add(current);
+                }
+                else
+                {
+                    Points[0] = anchor;
+                    Points[^1] = current;
+                }
+                break;
+            case HighlightMode.Freehand:
+                if (Points.Count == 0)
+                {
+                    Points.Add(anchor);
+                }
+                if (Points.Count == 1)
+                {
+                    Points.Add(current);
+                }
+                else if (Distance(Points[^1], current) >= 1.5)
+                {
+                    Points.Add(current);
+                }
+                else
+                {
+                    Points[^1] = current;
+                }
+                break;
+        }
+    }
+
+    public override void SetColor(Color color)
+    {
+        HighlightColor = color;
+    }
+
+    public void SetColorStrength(double strength)
+    {
+        ColorStrength = Math.Clamp(strength, 0, 1);
+    }
+
+    public void SetShadowStrength(double value)
+    {
+        ShadowStrength = Math.Clamp(value, 0, 1);
+    }
+
+    public void SetBorderWidth(double value)
+    {
+        BorderWidth = Math.Clamp(value, 0, 12);
+    }
+
+    public override AnnotationBase Clone()
+    {
+        var clone = new HighlightAnnotation
+        {
+            Mode = Mode,
+            Bounds = Bounds,
+            HighlightColor = HighlightColor,
+            ColorStrength = ColorStrength,
+        };
+        clone.Points.AddRange(Points);
+        clone.SetShadowStrength(ShadowStrength);
+        clone.SetBorderWidth(BorderWidth);
+        return clone;
+    }
+
+    private Geometry? CreateStrokeGeometry()
+    {
+        if (Points.Count < 2)
+        {
+            return null;
+        }
+
+        var figure = new PathFigure
+        {
+            StartPoint = Points[0],
+            IsClosed = false,
+            IsFilled = false,
+        };
+
+        for (var i = 1; i < Points.Count; i++)
+        {
+            figure.Segments.Add(new LineSegment(Points[i], true));
+        }
+
+        var geometry = new PathGeometry([figure]);
+        return geometry.GetWidenedPathGeometry(CreateStrokePen(GetStrokeThickness()));
+    }
+
+    private Pen CreateStrokePen(double thickness)
+    {
+        return new Pen(Brushes.Black, thickness)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round,
+        };
+    }
+
+    private double GetStrokeThickness()
+    {
+        return Mode == HighlightMode.Line ? LineThickness : FreehandThickness;
+    }
+
+    private Color GetFillColor(bool isHovered)
+    {
+        var maxAlpha = Mode == HighlightMode.Region ? 84 : 112;
+        var alpha = (int)Math.Round(maxAlpha * ColorStrength);
+        if (isHovered)
+        {
+            alpha += 8;
+        }
+
+        return WithAlpha(HighlightColor, (byte)Math.Clamp(alpha, 0, 255));
+    }
+
+    private static Rect Normalize(Rect rect)
+    {
+        return new Rect(rect.TopLeft, rect.BottomRight);
+    }
+}
+
+internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
 {
     private const double DefaultShaftThickness = 8;
     private const double DefaultHeadLength = 28;
@@ -3819,9 +5488,15 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
     public double HeadScale { get; private set; } = 1.0;
 
+    public double TailHeadScale { get; private set; } = 1.0;
+
     public double ShadowStrength { get; private set; }
 
     public double BorderWidth { get; private set; }
+
+    public bool HasStartHead { get; private set; }
+
+    public bool HasEndHead { get; private set; } = true;
 
     public void SetTailScale(double value) => TailScale = Math.Clamp(value, 0.15, 3.0);
 
@@ -3831,9 +5506,15 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
     public void SetHeadScale(double value) => HeadScale = Math.Clamp(value, 0.2, 1.6);
 
+    public void SetTailHeadScale(double value) => TailHeadScale = Math.Clamp(value, 0.2, 1.6);
+
     public void SetShadowStrength(double value) => ShadowStrength = Math.Clamp(value, 0, 1);
 
     public void SetBorderWidth(double value) => BorderWidth = Math.Clamp(value, 0, 12);
+
+    public void SetStartHeadEnabled(bool value) => HasStartHead = value;
+
+    public void SetEndHeadEnabled(bool value) => HasEndHead = value;
 
     public static ArrowAnnotation Create(Point point)
     {
@@ -3893,24 +5574,36 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
     public override void Render(Canvas canvas, bool isSelected, bool isHovered)
     {
-        var strokeColor = isHovered ? Darken(StrokeColor, 0.18) : StrokeColor;
-        var selectionGeometry = CreateExplicitArrowGeometry();
+        var strokeColor = StrokeColor;
+        var selectionGeometry = Style == ArrowStyle.BrushStroke || HasStartHead
+            ? CreateExplicitArrowGeometry()
+            : CreatePathGeometry(trimmedForArrowHead: false).GetWidenedPathGeometry(new Pen(Brushes.Black, GetResolvedShaftThickness() + 4));
+        AddArrowShadow(canvas, selectionGeometry, ShadowStrength);
         switch (Style)
         {
             case ArrowStyle.Classic:
-                RenderClassic(canvas, CreatePathGeometry(trimmedForArrowHead: true), strokeColor, isSelected);
+                RenderClassic(canvas, CreatePathGeometry(trimmedForArrowHead: HasEndHead), strokeColor, isSelected);
                 break;
             case ArrowStyle.Handdrawn:
-                RenderHanddrawn(canvas, CreatePathGeometry(trimmedForArrowHead: true), strokeColor, isSelected);
+                RenderHanddrawn(canvas, CreatePathGeometry(trimmedForArrowHead: HasEndHead), strokeColor, isSelected);
                 break;
             default:
                 RenderBrush(canvas, strokeColor, isSelected);
                 break;
         }
 
+        var interactionGeometry = CreateArrowInteractionGeometry(selectionGeometry, BorderWidth);
         if (isSelected)
         {
-            AddMarchingAntsPath(canvas, selectionGeometry);
+            AddArrowMarchingAntsOutline(canvas, interactionGeometry);
+        }
+        else if (isHovered)
+        {
+            AddArrowHoverOutline(canvas, interactionGeometry);
+        }
+
+        if (isSelected)
+        {
             AddHandle(canvas, Start);
             for (var i = 0; i < BendPoints.Count; i++)
             {
@@ -3918,6 +5611,88 @@ internal sealed class ArrowAnnotation : AnnotationBase
             }
             AddHandle(canvas, End);
         }
+    }
+
+    private static Geometry CreateArrowInteractionGeometry(Geometry geometry, double borderWidth)
+    {
+        if (geometry.Bounds.Width <= 0 || geometry.Bounds.Height <= 0)
+        {
+            return geometry;
+        }
+
+        var outerStroke = geometry.GetWidenedPathGeometry(new Pen(Brushes.Black, Math.Max(2, (borderWidth * 2) + 2))
+        {
+            LineJoin = PenLineJoin.Round,
+        });
+
+        return Geometry.Combine(geometry, outerStroke, GeometryCombineMode.Union, null);
+    }
+
+    private static void AddArrowHoverOutline(Canvas canvas, Geometry geometry)
+    {
+        var outline = new ShapePath
+        {
+            Data = geometry,
+            Stroke = new SolidColorBrush(Color.FromRgb(26, 169, 216)),
+            StrokeThickness = 2,
+            StrokeLineJoin = PenLineJoin.Round,
+            Fill = Brushes.Transparent,
+            IsHitTestVisible = false,
+        };
+        canvas.Children.Add(outline);
+    }
+
+    private static void AddArrowMarchingAntsOutline(Canvas canvas, Geometry geometry)
+    {
+        var dark = new ShapePath
+        {
+            Data = geometry,
+            Stroke = Brushes.Black,
+            StrokeThickness = 2,
+            StrokeDashArray = new DoubleCollection { 2, 2 },
+            StrokeLineJoin = PenLineJoin.Round,
+            Fill = Brushes.Transparent,
+            IsHitTestVisible = false,
+        };
+        canvas.Children.Add(dark);
+
+        var light = new ShapePath
+        {
+            Data = geometry,
+            Stroke = Brushes.White,
+            StrokeThickness = 2,
+            StrokeDashArray = new DoubleCollection { 2, 2 },
+            StrokeDashOffset = 2,
+            StrokeLineJoin = PenLineJoin.Round,
+            Fill = Brushes.Transparent,
+            IsHitTestVisible = false,
+        };
+        canvas.Children.Add(light);
+    }
+
+    private static void AddArrowShadow(Canvas canvas, Geometry geometry, double strength)
+    {
+        if (strength <= 0.001)
+        {
+            return;
+        }
+
+        var resolvedStrength = Math.Pow(Math.Clamp(strength, 0, 1), 0.65);
+        canvas.Children.Add(new ShapePath
+        {
+            Data = geometry,
+            Fill = MakeBrush(WithAlpha(Colors.Black, (byte)Math.Round(120 + (resolvedStrength * 110)))),
+            IsHitTestVisible = false,
+            Effect = new DropShadowEffect
+            {
+                BlurRadius = 10 + (resolvedStrength * 58),
+                ShadowDepth = 5 + (resolvedStrength * 26),
+                Direction = 315,
+                Color = Colors.Black,
+                Opacity = 0.62 + (resolvedStrength * 0.38),
+                RenderingBias = RenderingBias.Quality,
+            },
+        });
     }
 
     private static void AddBezierHandleLine(Canvas canvas, Point from, Point to)
@@ -4043,8 +5818,11 @@ internal sealed class ArrowAnnotation : AnnotationBase
             BodyScale = BodyScale,
             FrontScale = FrontScale,
             HeadScale = HeadScale,
+            TailHeadScale = TailHeadScale,
             ShadowStrength = ShadowStrength,
             BorderWidth = BorderWidth,
+            HasStartHead = HasStartHead,
+            HasEndHead = HasEndHead,
         };
         clone.BendPoints.AddRange(BendPoints);
         clone.SetColor(StrokeColor);
@@ -4059,12 +5837,19 @@ internal sealed class ArrowAnnotation : AnnotationBase
         var headWidth = GetResolvedHeadWidth();
         var strokeBrush = MakeBrush(strokeColor);
         canvas.Children.Add(CreateShaftPath(geometry, strokeBrush, isSelected ? shaftThickness + 1 : shaftThickness));
-        canvas.Children.Add(CreateFilledArrowHead(strokeBrush, headLength, headWidth));
+        if (HasEndHead)
+        {
+            canvas.Children.Add(CreateFilledArrowHead(strokeBrush, headLength, headWidth));
+        }
+        if (HasStartHead)
+        {
+            canvas.Children.Add(CreateFilledArrowHead(strokeBrush, GetResolvedTailHeadLength(), GetResolvedTailHeadWidth(), atStart: true));
+        }
     }
 
     private void RenderHanddrawn(Canvas canvas, PathGeometry geometry, Color strokeColor, bool isSelected)
     {
-        var points = GetSampledCenterlinePoints(trimmedForArrowHead: true, sampleCount: 28);
+        var points = GetSampledCenterlinePoints(trimmedForArrowHead: HasEndHead, sampleCount: 28);
         if (points.Count < 2)
         {
             RenderClassic(canvas, geometry, strokeColor, isSelected);
@@ -4078,34 +5863,24 @@ internal sealed class ArrowAnnotation : AnnotationBase
         canvas.Children.Add(CreateSketchStroke(points, WithAlpha(Darken(strokeColor, 0.08), 155), Math.Max(1, shaftThickness * 0.2), jitterSeed: 3.2, offsetScale: 9.8 + (shaftThickness * 0.5), dashArray: [1.2, 3.1]));
         canvas.Children.Add(CreateHanddrawnTail(strokeColor, offset: -(shaftThickness * 0.9), thickness: Math.Max(1.4, shaftThickness * 0.3), length: 18 + (shaftThickness * 1.8)));
         canvas.Children.Add(CreateHanddrawnTail(strokeColor, offset: shaftThickness * 0.52, thickness: Math.Max(1.1, shaftThickness * 0.2), length: 14 + (shaftThickness * 1.1)));
-        canvas.Children.Add(CreateHanddrawnHead(strokeColor, Math.Max(2.2, baseThickness * 0.72), GetResolvedHeadLength() * 1.04, GetResolvedHeadWidth() * 1.08));
+        if (HasEndHead)
+        {
+            canvas.Children.Add(CreateHanddrawnHead(strokeColor, Math.Max(2.2, baseThickness * 0.72), GetResolvedHeadLength() * 1.04, GetResolvedHeadWidth() * 1.08));
+        }
+        if (HasStartHead)
+        {
+            canvas.Children.Add(CreateHanddrawnHead(strokeColor, Math.Max(2.2, baseThickness * 0.72), GetResolvedTailHeadLength() * 1.04, GetResolvedTailHeadWidth() * 1.08, atStart: true));
+        }
     }
 
     private void RenderBrush(Canvas canvas, Color strokeColor, bool isSelected)
     {
-        if (ShadowStrength > 0.001)
-        {
-            canvas.Children.Add(new ShapePath
-            {
-                Data = CreateExplicitArrowGeometry(),
-                Fill = MakeBrush(WithAlpha(Colors.Black, (byte)Math.Round(40 + (ShadowStrength * 70)))),
-                IsHitTestVisible = false,
-                Effect = new DropShadowEffect
-                {
-                    BlurRadius = 6 + (ShadowStrength * 22),
-                    ShadowDepth = 1 + (ShadowStrength * 6),
-                    Direction = 315,
-                    Color = Colors.Black,
-                    Opacity = 0.22 + (ShadowStrength * 0.38),
-                },
-            });
-        }
-
+        var explicitGeometry = CreateExplicitArrowGeometry();
         if (BorderWidth > 0.001)
         {
             canvas.Children.Add(new ShapePath
             {
-                Data = CreateExplicitArrowGeometry(),
+                Data = explicitGeometry,
                 Fill = Brushes.Transparent,
                 Stroke = MakeBrush(GetBorderColor(strokeColor)),
                 StrokeThickness = BorderWidth * 2,
@@ -4116,10 +5891,22 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
         canvas.Children.Add(new ShapePath
         {
-            Data = CreateExplicitArrowGeometry(),
+            Data = explicitGeometry,
             Fill = MakeBrush(strokeColor),
             IsHitTestVisible = false,
         });
+    }
+
+    private void RenderBrushShaft(Canvas canvas, Color strokeColor, bool isSelected)
+    {
+        var shaftGeometry = CreatePathGeometry(trimmedForArrowHead: false);
+        var thickness = isSelected ? GetResolvedShaftThickness() + 1 : GetResolvedShaftThickness();
+        if (BorderWidth > 0.001)
+        {
+            canvas.Children.Add(CreateShaftPath(shaftGeometry, MakeBrush(GetBorderColor(strokeColor)), thickness + (BorderWidth * 2)));
+        }
+
+        canvas.Children.Add(CreateShaftPath(shaftGeometry, MakeBrush(strokeColor), thickness));
     }
 
     private void AddClippedOffsetStroke(Canvas canvas, PathGeometry arrowGeometry, IReadOnlyList<Point> points, double offset, Color strokeColor, double thickness)
@@ -4167,6 +5954,8 @@ internal sealed class ArrowAnnotation : AnnotationBase
         var headWidth = Math.Clamp(GetResolvedHeadWidth() * HeadScale, minHeadWidth, maxHeadWidth);
         // Make sure the head is always at least as wide as the shaft + visible barbs.
         headWidth = Math.Max(headWidth, (shaftThickness + 14) * HeadScale);
+        var tailHeadLength = GetResolvedTailHeadLength();
+        var tailHeadWidth = GetResolvedTailHeadWidth();
 
         // Sample the centerline and trim it so the shaft stops where the arrowhead begins.
         var fullCenterline = GetSampledCenterlinePoints(trimmedForArrowHead: false, sampleCount: 64);
@@ -4175,7 +5964,13 @@ internal sealed class ArrowAnnotation : AnnotationBase
             fullCenterline = new List<Point> { Start, End };
         }
 
-        var trimmedCenterline = TrimPolylineFromEnd(fullCenterline, headLength);
+        var trimmedCenterline = HasStartHead
+            ? TrimPolylineFromStart(fullCenterline, tailHeadLength)
+            : fullCenterline;
+        if (HasEndHead)
+        {
+            trimmedCenterline = TrimPolylineFromEnd(trimmedCenterline, headLength);
+        }
         if (trimmedCenterline.Count < 2)
         {
             trimmedCenterline = new List<Point> { Start, End };
@@ -4190,6 +5985,16 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
         var shaftBaseCenter = trimmedCenterline[^1];
         var tip = End;
+        var startDir = trimmedCenterline.Count >= 2 ? trimmedCenterline[1] - trimmedCenterline[0] : End - Start;
+        if (startDir.Length < 0.001) startDir = End - Start;
+        if (startDir.Length < 0.001) startDir = new Vector(1, 0);
+        startDir.Normalize();
+        var startHeadDir = -startDir;
+        var startNormal = new Vector(-startHeadDir.Y, startHeadDir.X);
+        var tailBaseCenter = trimmedCenterline[0];
+        var tailTip = Start;
+        var tailLeftBarb = tailBaseCenter + (startNormal * (tailHeadWidth / 2.0));
+        var tailRightBarb = tailBaseCenter - (startNormal * (tailHeadWidth / 2.0));
 
         // Build left/right edges of the shaft along the centerline.
         // Width varies along the shaft using TailScale (t=0), BodyScale (t=0.5), and 1.0 at the head base (t=1)
@@ -4215,27 +6020,40 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
         var figure = new PathFigure
         {
-            StartPoint = leftEdge[0],
+            StartPoint = HasStartHead ? tailTip : leftEdge[0],
             IsClosed = true,
             IsFilled = true,
             Segments = new PathSegmentCollection(),
         };
 
-        for (var i = 1; i < leftEdge.Count; i++)
+        if (HasStartHead)
+        {
+            figure.Segments.Add(new LineSegment(tailLeftBarb, true));
+        }
+
+        for (var i = HasStartHead ? 0 : 1; i < leftEdge.Count; i++)
         {
             figure.Segments.Add(new LineSegment(leftEdge[i], true));
         }
 
-        // Replace the last left point with the precise shaftLeftBase to avoid micro-misalignment with the head.
-        figure.Segments.Add(new LineSegment(shaftLeftBase, true));
-        figure.Segments.Add(new LineSegment(headLeftBarb, true));
-        figure.Segments.Add(new LineSegment(tip, true));
-        figure.Segments.Add(new LineSegment(headRightBarb, true));
-        figure.Segments.Add(new LineSegment(shaftRightBase, true));
+        if (HasEndHead)
+        {
+            // Replace the last left point with the precise shaftLeftBase to avoid micro-misalignment with the head.
+            figure.Segments.Add(new LineSegment(shaftLeftBase, true));
+            figure.Segments.Add(new LineSegment(headLeftBarb, true));
+            figure.Segments.Add(new LineSegment(tip, true));
+            figure.Segments.Add(new LineSegment(headRightBarb, true));
+            figure.Segments.Add(new LineSegment(shaftRightBase, true));
+        }
 
         for (var i = rightEdge.Count - 1; i >= 0; i--)
         {
             figure.Segments.Add(new LineSegment(rightEdge[i], true));
+        }
+
+        if (HasStartHead)
+        {
+            figure.Segments.Add(new LineSegment(tailRightBarb, true));
         }
 
         return new PathGeometry([figure]) { FillRule = FillRule.Nonzero };
@@ -4286,6 +6104,38 @@ internal sealed class ArrowAnnotation : AnnotationBase
         return new List<Point> { points[0], points[0] + (dir * 1.0) };
     }
 
+    private static List<Point> TrimPolylineFromStart(IReadOnlyList<Point> points, double trimLength)
+    {
+        if (points.Count < 2 || trimLength <= 0)
+        {
+            return points.ToList();
+        }
+
+        double remaining = trimLength;
+        for (var i = 0; i < points.Count - 1; i++)
+        {
+            var seg = points[i + 1] - points[i];
+            var segLen = seg.Length;
+            if (segLen >= remaining)
+            {
+                seg.Normalize();
+                var cut = points[i] + (seg * remaining);
+                var trimmed = new List<Point>(points.Count - i) { cut };
+                for (var k = i + 1; k < points.Count; k++)
+                {
+                    trimmed.Add(points[k]);
+                }
+                return trimmed;
+            }
+            remaining -= segLen;
+        }
+
+        var dir = points[^2] - points[^1];
+        if (dir.Length < 0.001) dir = new Vector(-1, 0);
+        dir.Normalize();
+        return new List<Point> { points[^1] + (dir * 1.0), points[^1] };
+    }
+
     private ShapePath CreateShaftPath(PathGeometry geometry, Brush strokeBrush, double thickness)
     {
         return new ShapePath
@@ -4299,9 +6149,9 @@ internal sealed class ArrowAnnotation : AnnotationBase
         };
     }
 
-    private Polygon CreateFilledArrowHead(Brush fillBrush, double headLength, double headWidth)
+    private Polygon CreateFilledArrowHead(Brush fillBrush, double headLength, double headWidth, bool atStart = false)
     {
-        var frame = GetArrowHeadFrame(headLength, headWidth);
+        var frame = GetArrowHeadFrame(headLength, headWidth, atStart);
         return new Polygon
         {
             Fill = fillBrush,
@@ -4315,9 +6165,9 @@ internal sealed class ArrowAnnotation : AnnotationBase
         };
     }
 
-    private Geometry CreateArrowHeadGeometry(double headLength, double headWidth)
+    private Geometry CreateArrowHeadGeometry(double headLength, double headWidth, bool atStart = false)
     {
-        var frame = GetArrowHeadFrame(headLength, headWidth);
+        var frame = GetArrowHeadFrame(headLength, headWidth, atStart);
         var figure = new PathFigure
         {
             StartPoint = frame.Tip,
@@ -4407,9 +6257,9 @@ internal sealed class ArrowAnnotation : AnnotationBase
         };
     }
 
-    private ShapePath CreateHanddrawnHead(Color strokeColor, double thickness, double headLength, double headWidth)
+    private ShapePath CreateHanddrawnHead(Color strokeColor, double thickness, double headLength, double headWidth, bool atStart = false)
     {
-        var frame = GetArrowHeadFrame(headLength, headWidth);
+        var frame = GetArrowHeadFrame(headLength, headWidth, atStart);
         var leftMid = frame.Tip - (frame.Direction * (headLength * 0.42)) + (frame.Normal * (headWidth * 0.16));
         var rightMid = frame.Tip - (frame.Direction * (headLength * 0.34)) - (frame.Normal * (headWidth * 0.08));
 
@@ -4440,9 +6290,9 @@ internal sealed class ArrowAnnotation : AnnotationBase
         };
     }
 
-    private Polygon CreateBrushArrowHead(Color strokeColor, double headLength, double headWidth)
+    private Polygon CreateBrushArrowHead(Color strokeColor, double headLength, double headWidth, bool atStart = false)
     {
-        var frame = GetArrowHeadFrame(headLength, headWidth);
+        var frame = GetArrowHeadFrame(headLength, headWidth, atStart);
         var upperShoulder = frame.LeftBase + (frame.Direction * (headLength * 0.02));
         var innerNotch = frame.Tip - (frame.Direction * (headLength * 0.42)) + (frame.Normal * (headWidth * 0.04));
         var lowerShoulder = frame.RightBase + (frame.Direction * (headLength * 0.28));
@@ -4462,9 +6312,9 @@ internal sealed class ArrowAnnotation : AnnotationBase
         };
     }
 
-    private Geometry CreateBrushArrowHeadGeometry(double headLength, double headWidth)
+    private Geometry CreateBrushArrowHeadGeometry(double headLength, double headWidth, bool atStart = false)
     {
-        var frame = GetArrowHeadFrame(headLength, headWidth);
+        var frame = GetArrowHeadFrame(headLength, headWidth, atStart);
         var upperShoulder = frame.LeftBase + (frame.Direction * (headLength * 0.02));
         var innerNotch = frame.Tip - (frame.Direction * (headLength * 0.42)) + (frame.Normal * (headWidth * 0.04));
         var lowerShoulder = frame.RightBase + (frame.Direction * (headLength * 0.28));
@@ -4906,6 +6756,11 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
     private Point GetArrowShaftEnd()
     {
+        if (!HasEndHead)
+        {
+            return End;
+        }
+
         var direction = GetArrowHeadDirection();
         if (direction.Length < 0.001)
         {
@@ -4974,6 +6829,16 @@ internal sealed class ArrowAnnotation : AnnotationBase
         return Math.Clamp(HeadWidth, MinHeadWidth, maxWidth);
     }
 
+    private double GetResolvedTailHeadLength()
+    {
+        return Math.Clamp(GetResolvedHeadLength() * TailHeadScale, MinHeadLength, MaxHeadLength);
+    }
+
+    private double GetResolvedTailHeadWidth()
+    {
+        return Math.Clamp(GetResolvedHeadWidth() * TailHeadScale, MinHeadWidth, MaxHeadWidth);
+    }
+
     private double GetResolvedOuterEdgeWidth()
     {
         var maxWidth = Math.Max(MinEdgeWidth, Math.Min(MaxEdgeWidth, GetApproximateLength() * 0.95));
@@ -4998,12 +6863,12 @@ internal sealed class ArrowAnnotation : AnnotationBase
         return Math.Clamp(HeadSkew, -limit, limit);
     }
 
-    private (Point Tip, Point BaseCenter, Point LeftBase, Point RightBase, Vector Direction, Vector Normal) GetArrowHeadFrame(double headLength, double headWidth)
+    private (Point Tip, Point BaseCenter, Point LeftBase, Point RightBase, Vector Direction, Vector Normal) GetArrowHeadFrame(double headLength, double headWidth, bool atStart = false)
     {
-        var direction = GetArrowHeadDirection();
+        var direction = atStart ? -GetStartDirection() : GetArrowHeadDirection();
         if (direction.Length < 0.001)
         {
-            direction = End - Start;
+            direction = atStart ? Start - End : End - Start;
         }
 
         if (direction.Length < 0.001)
@@ -5013,9 +6878,11 @@ internal sealed class ArrowAnnotation : AnnotationBase
 
         direction.Normalize();
         var normal = new Vector(-direction.Y, direction.X);
-        var baseCenter = End - (direction * headLength) + (normal * GetResolvedHeadSkew());
+        var tip = atStart ? Start : End;
+        var skew = atStart ? -GetResolvedHeadSkew() : GetResolvedHeadSkew();
+        var baseCenter = tip - (direction * headLength) + (normal * skew);
         return (
-            Tip: End,
+            Tip: tip,
             BaseCenter: baseCenter,
             LeftBase: baseCenter + (normal * headWidth),
             RightBase: baseCenter - (normal * headWidth),

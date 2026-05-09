@@ -47,6 +47,11 @@
         <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#768693A2" />
         <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#9AA1ADBA" />
         <SolidColorBrush x:Key="ScrollBarThumbPressedBrush" Color="#C0B7C3CF" />
+        <SolidColorBrush x:Key="EditorSliderTrackBrush" Color="#30333A" />
+        <SolidColorBrush x:Key="EditorSliderFillBrush" Color="#FF1AA9D8" />
+        <SolidColorBrush x:Key="EditorSliderFillHoverBrush" Color="#FF34BCE6" />
+        <SolidColorBrush x:Key="EditorSliderThumbBrush" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="EditorSliderThumbBorderBrush" Color="#26000000" />
         <LinearGradientBrush x:Key="ShellGlowBrush" StartPoint="0,0" EndPoint="1,1">
             <GradientStop Color="#44FFB86C" Offset="0" />
             <GradientStop Color="#14FF7A00" Offset="0.4" />
@@ -203,6 +208,41 @@
             <Setter Property="Foreground" Value="White" />
         </Style>
 
+        <Style x:Key="EditorDeleteIconButtonStyle" TargetType="Button">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="{DynamicResource DeleteButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource DeleteButtonBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource DeleteButtonForegroundBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="ToolTipService.InitialShowDelay" Value="250" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="DeleteButtonSurface"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="DeleteButtonSurface" Property="Opacity" Value="0.86" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="DeleteButtonSurface" Property="Opacity" Value="0.72" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="EditorTopBarToolButtonStyle" TargetType="ToggleButton">
             <Setter Property="Width" Value="44" />
             <Setter Property="Height" Value="44" />
@@ -292,6 +332,102 @@
             <Setter Property="Effect">
                 <Setter.Value>
                     <DropShadowEffect BlurRadius="30" ShadowDepth="10" Color="#99000000" Opacity="0.34" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EditorSliderTrackButtonStyle" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="Background" Value="{DynamicResource EditorSliderTrackBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Height="6"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3"
+                                SnapsToDevicePixels="True" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EditorSliderFillButtonStyle" TargetType="RepeatButton" BasedOn="{StaticResource EditorSliderTrackButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource EditorSliderFillBrush}" />
+        </Style>
+
+        <Style x:Key="EditorSliderThumbStyle" TargetType="Thumb">
+            <Setter Property="Width" Value="14" />
+            <Setter Property="Height" Value="14" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Ellipse x:Name="ThumbSurface"
+                                 Width="14"
+                                 Height="14"
+                                 Fill="{DynamicResource EditorSliderThumbBrush}"
+                                 Stroke="{DynamicResource EditorSliderThumbBorderBrush}"
+                                 StrokeThickness="1"
+                                 SnapsToDevicePixels="True">
+                            <Ellipse.Effect>
+                                <DropShadowEffect BlurRadius="8" ShadowDepth="1" Color="#99000000" Opacity="0.32" />
+                            </Ellipse.Effect>
+                        </Ellipse>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbSurface" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <ScaleTransform ScaleX="1.08" ScaleY="1.08" CenterX="7" CenterY="7" />
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbSurface" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <ScaleTransform ScaleX="1.12" ScaleY="1.12" CenterX="7" CenterY="7" />
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Slider">
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Foreground" Value="{DynamicResource EditorSliderFillBrush}" />
+            <Setter Property="Background" Value="{DynamicResource EditorSliderTrackBrush}" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="24" SnapsToDevicePixels="True">
+                            <Track x:Name="PART_Track"
+                                   Height="18"
+                                   VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  Style="{StaticResource EditorSliderFillButtonStyle}" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  Style="{StaticResource EditorSliderTrackButtonStyle}" />
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource EditorSliderThumbStyle}" />
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
@@ -410,7 +546,7 @@
                     BorderBrush="Transparent"
                     BorderThickness="0"
                     SnapsToDevicePixels="True">
-                <Grid ClipToBounds="True">
+                <Grid ClipToBounds="False">
                     <Rectangle Fill="{DynamicResource ShellScrimBrush}" IsHitTestVisible="False" />
                     <Rectangle Fill="{DynamicResource ShellTopHighlightBrush}"
                                Height="140"
@@ -432,7 +568,7 @@
                                   ScrollChanged="ArtworkScrollViewer_ScrollChanged">
                         <Grid MinWidth="{Binding ElementName=ArtworkScrollViewer, Path=ViewportWidth}"
                               MinHeight="{Binding ElementName=ArtworkScrollViewer, Path=ViewportHeight}">
-                            <Border Margin="0,60,0,136"
+                            <Border Margin="0,80,0,136"
                                     Background="Transparent"
                                     BorderBrush="Transparent"
                                     BorderThickness="0"
@@ -488,8 +624,7 @@
                                                         BorderThickness="1"
                                                         CornerRadius="12">
                                                     <TextBox x:Name="InlineTextEditor"
-                                                             MinWidth="160"
-                                                             MaxWidth="340"
+                                                             MinWidth="64"
                                                              MinHeight="46"
                                                              Padding="12,8"
                                                              Background="Transparent"
@@ -532,8 +667,8 @@
                     <Border x:Name="FileActionsIsland"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Top"
-                            Margin="4"
-                            Padding="10"
+                            Margin="12"
+                            Padding="12,6"
                             Panel.ZIndex="25"
                             Background="{DynamicResource IslandBackgroundBrush}"
                             BorderBrush="{DynamicResource IslandBorderBrush}"
@@ -584,6 +719,50 @@
                         </StackPanel>
                     </Border>
 
+                    <Border x:Name="ZoomActionsIsland"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Margin="12"
+                            Padding="12,6"
+                            Panel.ZIndex="25"
+                            Background="{DynamicResource IslandBackgroundBrush}"
+                            BorderBrush="{DynamicResource IslandBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="26">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="34" ShadowDepth="12" Color="#CC000000" Opacity="0.46" />
+                        </Border.Effect>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Click="ZoomActualSize_Click" Style="{StaticResource EditorTopBarButtonStyle}" ToolTip="Zoom to 100% image size">
+                                <Grid Width="20" Height="18">
+                                    <TextBlock Text="1:1"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}" />
+                                </Grid>
+                            </Button>
+                            <Button Margin="8,0,0,0" Click="ZoomFitToView_Click" Style="{StaticResource EditorTopBarButtonStyle}" ToolTip="Fit image to view">
+                                <Viewbox Width="18" Height="18">
+                                    <Canvas Width="18" Height="18">
+                                        <Rectangle Width="12" Height="9" Canvas.Left="3" Canvas.Top="4.5"
+                                                   RadiusX="1.5"
+                                                   RadiusY="1.5"
+                                                   Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                   StrokeThickness="1.6" />
+                                        <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                              StrokeThickness="1.5"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Data="M1.8,6.5 L1.8,2.2 L6.1,2.2 M11.9,2.2 L16.2,2.2 L16.2,6.5 M16.2,11.5 L16.2,15.8 L11.9,15.8 M6.1,15.8 L1.8,15.8 L1.8,11.5" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+
                     <Border x:Name="SelectionActionIsland"
                             Visibility="Collapsed"
                             HorizontalAlignment="Left"
@@ -601,61 +780,114 @@
                         <Border.RenderTransform>
                             <TranslateTransform x:Name="SelectionActionIslandTransform" />
                         </Border.RenderTransform>
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#0A7A68">
-                                    <Border Width="20" Height="20" Background="#0A7A68" BorderBrush="White" BorderThickness="2" CornerRadius="10" />
+                                    <Border Width="20" Height="20" Background="#0A7A68" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
+                                </Button>
+                                <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#F5D90A">
+                                    <Border Width="20" Height="20" Background="#F5D90A" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                                 <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#F08C00">
-                                    <Border Width="20" Height="20" Background="#F08C00" BorderBrush="White" BorderThickness="2" CornerRadius="10" />
+                                    <Border Width="20" Height="20" Background="#F08C00" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                                 <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#D94841">
-                                    <Border Width="20" Height="20" Background="#D94841" BorderBrush="White" BorderThickness="2" CornerRadius="10" />
+                                    <Border Width="20" Height="20" Background="#D94841" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
+                                </Button>
+                                <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#EC4899">
+                                    <Border Width="20" Height="20" Background="#EC4899" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
+                                </Button>
+                                <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#06B6D4">
+                                    <Border Width="20" Height="20" Background="#06B6D4" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                                 <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#7C3AED">
-                                    <Border Width="20" Height="20" Background="#7C3AED" BorderBrush="White" BorderThickness="2" CornerRadius="10" />
+                                    <Border Width="20" Height="20" Background="#7C3AED" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                                 <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#2563EB">
-                                    <Border Width="20" Height="20" Background="#2563EB" BorderBrush="White" BorderThickness="2" CornerRadius="10" />
+                                    <Border Width="20" Height="20" Background="#2563EB" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                                 <Button Width="26" Height="26" Margin="0,0,8,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#111827">
-                                    <Border Width="20" Height="20" Background="#111827" BorderBrush="White" BorderThickness="2" CornerRadius="10" />
+                                    <Border Width="20" Height="20" Background="#111827" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                             </StackPanel>
+                            <StackPanel x:Name="ResetActionPanel" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <Button Width="34"
+                                        Height="28"
+                                        Padding="0"
+                                        Click="ResetAnnotation_Click"
+                                        Background="{DynamicResource SecondaryButtonBrush}"
+                                        Foreground="{DynamicResource IslandTextBrush}"
+                                        BorderBrush="{DynamicResource SecondaryButtonBorderBrush}"
+                                        BorderThickness="1"
+                                        ToolTip="Reset selected object to default values">
+                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" Margin="0" Text="&#xE72C;" />
+                                </Button>
+                            </StackPanel>
+                            <StackPanel x:Name="DeleteActionPanel" Orientation="Horizontal" Margin="6,0,0,0" VerticalAlignment="Center">
+                                <Button Width="34"
+                                        Height="28"
+                                        Click="DeleteAnnotation_Click"
+                                        Style="{StaticResource EditorDeleteIconButtonStyle}"
+                                        ToolTip="Delete selected object">
+                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" Margin="0" Text="&#xE74D;" />
+                                </Button>
+                            </StackPanel>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center" HorizontalAlignment="Center">
                             <StackPanel x:Name="TextSizePanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Size" VerticalAlignment="Center" />
+                                <Slider x:Name="TextFontSizeSlider"
+                                        Width="160"
+                                        Margin="8,0,0,0"
+                                        Minimum="12"
+                                        Maximum="72"
+                                        Value="26"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="False"
+                                        SmallChange="1"
+                                        LargeChange="4"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="TextFontSizeSlider_ValueChanged"
+                                        ToolTip="Text size" />
+                                <TextBlock x:Name="TextFontSizeValueText"
+                                           Width="34"
+                                           Margin="8,0,0,0"
+                                           Foreground="{DynamicResource IslandMutedTextBrush}"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Text="26" />
+                            </StackPanel>
+                            <StackPanel x:Name="TextAlignmentPanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
                                 <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
-                                <Button Width="34" Height="28" Margin="0,0,6,0" Padding="0" Click="TextSizeOption_Click" Style="{StaticResource EditorSecondaryButtonStyle}" Tag="18" ToolTip="Small text">
-                                    <Viewbox Width="16" Height="16">
-                                        <Grid Width="16" Height="16">
-                                            <TextBlock Text="T" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Top" />
-                                            <Rectangle Width="10" Height="1.5" RadiusX="0.75" RadiusY="0.75" Fill="{DynamicResource IslandTextBrush}" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,2" />
-                                        </Grid>
-                                    </Viewbox>
-                                </Button>
-                                <Button Width="34" Height="28" Margin="0,0,6,0" Padding="0" Click="TextSizeOption_Click" Style="{StaticResource EditorSecondaryButtonStyle}" Tag="26" ToolTip="Medium text">
-                                    <Viewbox Width="16" Height="16">
-                                        <Grid Width="16" Height="16">
-                                            <TextBlock Text="T" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Top" />
-                                            <Rectangle Width="10" Height="1.5" RadiusX="0.75" RadiusY="0.75" Fill="{DynamicResource IslandTextBrush}" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,2" />
-                                        </Grid>
-                                    </Viewbox>
-                                </Button>
-                                <Button Width="34" Height="28" Margin="0,0,6,0" Padding="0" Click="TextSizeOption_Click" Style="{StaticResource EditorSecondaryButtonStyle}" Tag="34" ToolTip="Large text">
-                                    <Viewbox Width="16" Height="16">
-                                        <Grid Width="16" Height="16">
-                                            <TextBlock Text="T" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Top" />
-                                            <Rectangle Width="10" Height="1.5" RadiusX="0.75" RadiusY="0.75" Fill="{DynamicResource IslandTextBrush}" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,2" />
-                                        </Grid>
-                                    </Viewbox>
-                                </Button>
-                                <Button Width="34" Height="28" Padding="0" Click="TextSizeOption_Click" Style="{StaticResource EditorSecondaryButtonStyle}" Tag="42" ToolTip="Extra large text">
-                                    <Viewbox Width="16" Height="16">
-                                        <Grid Width="16" Height="16">
-                                            <TextBlock Text="T" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Top" />
-                                            <Rectangle Width="10" Height="1.5" RadiusX="0.75" RadiusY="0.75" Fill="{DynamicResource IslandTextBrush}" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,2" />
-                                        </Grid>
-                                    </Viewbox>
-                                </Button>
+                                <ToggleButton x:Name="TextAlignLeftButton"
+                                              Width="30" Height="28" Margin="0,0,2,0" Padding="0"
+                                              Checked="TextAlignLeft_Checked" Unchecked="TextAlignLeft_Checked"
+                                              Style="{StaticResource EditorTopBarToolButtonStyle}"
+                                              ToolTip="Align text left">
+                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" Margin="0" FontSize="14" Text="&#xE8E4;" />
+                                </ToggleButton>
+                                <ToggleButton x:Name="TextAlignCenterButton"
+                                              Width="30" Height="28" Margin="0,0,2,0" Padding="0"
+                                              Checked="TextAlignCenter_Checked" Unchecked="TextAlignCenter_Checked"
+                                              Style="{StaticResource EditorTopBarToolButtonStyle}"
+                                              ToolTip="Align text center">
+                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" Margin="0" FontSize="14" Text="&#xE8E3;" />
+                                </ToggleButton>
+                                <ToggleButton x:Name="TextAlignRightButton"
+                                              Width="30" Height="28" Margin="0,0,8,0" Padding="0"
+                                              Checked="TextAlignRight_Checked" Unchecked="TextAlignRight_Checked"
+                                              Style="{StaticResource EditorTopBarToolButtonStyle}"
+                                              ToolTip="Align text right">
+                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" Margin="0" FontSize="14" Text="&#xE8E2;" />
+                                </ToggleButton>
+                                <ToggleButton x:Name="TextBoldButton"
+                                              Width="30" Height="28" Margin="0" Padding="0"
+                                              Checked="TextBoldButton_Checked" Unchecked="TextBoldButton_Checked"
+                                              Style="{StaticResource EditorTopBarToolButtonStyle}"
+                                              ToolTip="Bold">
+                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" Margin="0" FontSize="14" Text="&#xE8DD;" />
+                                </ToggleButton>
                             </StackPanel>
                             <StackPanel x:Name="TextBackgroundOpacityPanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
                                 <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
@@ -699,6 +931,28 @@
                                            VerticalAlignment="Center"
                                            Text="30%" />
                             </StackPanel>
+                                    <StackPanel x:Name="HighlightStrengthPanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
+                                    <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Strength" VerticalAlignment="Center" />
+                                    <Slider x:Name="HighlightStrengthSlider"
+                                        Width="140"
+                                        Margin="8,0,0,0"
+                                        Minimum="0"
+                                        Maximum="100"
+                                        TickFrequency="5"
+                                        IsSnapToTickEnabled="False"
+                                        SmallChange="1"
+                                        LargeChange="10"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="HighlightStrengthSlider_ValueChanged" />
+                                    <TextBlock x:Name="HighlightStrengthValueText"
+                                           Width="42"
+                                           Margin="8,0,0,0"
+                                           Foreground="{DynamicResource IslandMutedTextBrush}"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Text="55%" />
+                                    </StackPanel>
                             <StackPanel x:Name="ObscureBlurLevelPanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
                                 <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
                                 <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Blur" VerticalAlignment="Center" />
@@ -739,7 +993,7 @@
                                            Foreground="{DynamicResource IslandMutedTextBrush}"
                                            FontSize="12"
                                            VerticalAlignment="Center"
-                                           Text="25%" />
+                                           Text="20%" />
                                     </StackPanel>
                                     <StackPanel x:Name="ObscureColorStrengthPanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
                                     <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
@@ -749,7 +1003,7 @@
                                         Margin="8,0,0,0"
                                         Minimum="0"
                                         Maximum="100"
-                                        Value="10"
+                                        Value="15"
                                         TickFrequency="10"
                                         IsSnapToTickEnabled="False"
                                         SmallChange="1"
@@ -761,7 +1015,16 @@
                                            Foreground="{DynamicResource IslandMutedTextBrush}"
                                            FontSize="12"
                                            VerticalAlignment="Center"
-                                           Text="10%" />
+                                           Text="15%" />
+                            </StackPanel>
+                            <StackPanel x:Name="ObjectStylePanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
+                                <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
+                                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Shadow" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <Slider x:Name="ObjectShadowSlider" Width="120" Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="5" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ObjectShadowSlider_ValueChanged" ToolTip="Drop shadow" />
+                                <TextBlock x:Name="ObjectShadowValueLabel" Width="42" Margin="4,0,14,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="0%" />
+                                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Border" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <Slider x:Name="ObjectBorderSlider" Width="120" Minimum="0" Maximum="12" SmallChange="0.25" LargeChange="1" TickFrequency="0.25" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ObjectBorderSlider_ValueChanged" ToolTip="Border width" />
+                                <TextBlock x:Name="ObjectBorderValueLabel" Width="42" Margin="4,0,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="0.0" />
                             </StackPanel>
                             <StackPanel x:Name="ArrowOptionsPanel" Orientation="Vertical" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -780,6 +1043,59 @@
                                     <TextBlock x:Name="ArrowHeadValueLabel" Width="34" Margin="4,0,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="1.0" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="11,8,0,0" VerticalAlignment="Center">
+                                    <ToggleButton x:Name="ArrowHeadToggleButton"
+                                                  Width="34"
+                                                  Height="28"
+                                                  Margin="0,0,10,0"
+                                                  Padding="0"
+                                                  Checked="ArrowHeadToggleButton_Checked"
+                                                  Unchecked="ArrowHeadToggleButton_Checked"
+                                                  Style="{StaticResource EditorTopBarToolButtonStyle}"
+                                                  ToolTip="Toggle the front arrow head">
+                                        <Viewbox Width="17" Height="17">
+                                            <Canvas Width="18" Height="18">
+                                                <Line X1="3" Y1="9" X2="14" Y2="9"
+                                                      Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                      StrokeThickness="1.8"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round" />
+                                                <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                      StrokeThickness="1.8"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      Data="M10,5 L14,9 L10,13" />
+                                            </Canvas>
+                                        </Viewbox>
+                                    </ToggleButton>
+                                    <ToggleButton x:Name="ArrowTailToggleButton"
+                                                  Width="34"
+                                                  Height="28"
+                                                  Margin="0,0,10,0"
+                                                  Padding="0"
+                                                  Checked="ArrowTailToggleButton_Checked"
+                                                  Unchecked="ArrowTailToggleButton_Checked"
+                                                  Style="{StaticResource EditorTopBarToolButtonStyle}"
+                                                  ToolTip="Add an arrow head to the tail">
+                                        <Viewbox Width="17" Height="17">
+                                            <Canvas Width="18" Height="18">
+                                                <Line X1="4" Y1="9" X2="15" Y2="9"
+                                                      Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                      StrokeThickness="1.8"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round" />
+                                                <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                      StrokeThickness="1.8"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      Data="M8,5 L4,9 L8,13" />
+                                            </Canvas>
+                                        </Viewbox>
+                                    </ToggleButton>
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Tail head" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <Slider x:Name="ArrowTailHeadSlider" Width="96" Minimum="0.2" Maximum="1.6" SmallChange="0.05" LargeChange="0.2" TickFrequency="0.05" IsSnapToTickEnabled="True" VerticalAlignment="Center" ValueChanged="ArrowTailHeadSlider_ValueChanged" ToolTip="Tail head size" />
+                                    <TextBlock x:Name="ArrowTailHeadValueLabel" Width="34" Margin="4,0,14,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="1.0" />
                                     <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Shadow" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <Slider x:Name="ArrowShadowSlider" Width="140" Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="5" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ArrowShadowSlider_ValueChanged" ToolTip="Drop shadow" />
                                     <TextBlock x:Name="ArrowShadowValueLabel" Width="42" Margin="4,0,14,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="0%" />
@@ -788,32 +1104,85 @@
                                     <TextBlock x:Name="ArrowBorderValueLabel" Width="42" Margin="4,0,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="0.0" />
                                 </StackPanel>
                             </StackPanel>
-                            <StackPanel x:Name="DeleteActionPanel" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center">
-                                <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
-                                <Button Padding="12,8"
-                                        Click="DeleteAnnotation_Click"
-                                        Background="{DynamicResource DeleteButtonBackgroundBrush}"
-                                        Foreground="{DynamicResource DeleteButtonForegroundBrush}"
-                                        BorderBrush="{DynamicResource DeleteButtonBorderBrush}"
-                                        BorderThickness="1">
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <TextBlock Style="{StaticResource EditorGlyphStyle}" Text="&#xE74D;" />
-                                        <TextBlock Style="{StaticResource EditorIconLabelStyle}" Text="Delete" />
-                                    </StackPanel>
-                                </Button>
                             </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="LayerActionsIsland"
+                            Visibility="Collapsed"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Margin="12"
+                            Padding="8"
+                            Panel.ZIndex="24"
+                            Background="{DynamicResource IslandBackgroundBrush}"
+                            BorderBrush="{DynamicResource IslandBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="24">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="34" ShadowDepth="12" Color="#CC000000" Opacity="0.46" />
+                        </Border.Effect>
+                        <StackPanel Orientation="Vertical">
+                            <Button x:Name="LayerTopButton" Click="LayerTop_Click" Style="{StaticResource EditorTopBarButtonStyle}" ToolTip="Move selected object to top layer">
+                                <Viewbox Width="18" Height="18">
+                                    <Canvas Width="18" Height="18">
+                                        <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                              StrokeThickness="1.6"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Data="M4,4 H14 M9,4 V14 M5.5,8 L9,4.5 L12.5,8" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button x:Name="LayerUpButton" Margin="0,8,0,0" Click="LayerUp_Click" Style="{StaticResource EditorTopBarButtonStyle}" ToolTip="Move selected object up one layer">
+                                <Viewbox Width="18" Height="18">
+                                    <Canvas Width="18" Height="18">
+                                        <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                              StrokeThickness="1.7"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Data="M9,4 V14 M5.5,7.5 L9,4 L12.5,7.5" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button x:Name="LayerDownButton" Margin="0,8,0,0" Click="LayerDown_Click" Style="{StaticResource EditorTopBarButtonStyle}" ToolTip="Move selected object down one layer">
+                                <Viewbox Width="18" Height="18">
+                                    <Canvas Width="18" Height="18">
+                                        <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                              StrokeThickness="1.7"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Data="M9,4 V14 M5.5,10.5 L9,14 L12.5,10.5" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
+                            <Button x:Name="LayerBottomButton" Margin="0,8,0,0" Click="LayerBottom_Click" Style="{StaticResource EditorTopBarButtonStyle}" ToolTip="Move selected object to bottom layer">
+                                <Viewbox Width="18" Height="18">
+                                    <Canvas Width="18" Height="18">
+                                        <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                              StrokeThickness="1.6"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              StrokeLineJoin="Round"
+                                              Data="M4,14 H14 M9,4 V14 M5.5,10 L9,13.5 L12.5,10" />
+                                    </Canvas>
+                                </Viewbox>
+                            </Button>
                         </StackPanel>
                     </Border>
 
                     <Border x:Name="EditorFooterPanel"
                             VerticalAlignment="Bottom"
                             HorizontalAlignment="Center"
-                            Margin="4"
+                            Margin="12"
                             Padding="0"
                             Background="Transparent"
                             BorderBrush="Transparent"
                             BorderThickness="0">
-                        <StackPanel HorizontalAlignment="Center">
+                        <StackPanel x:Name="EditorFooterStack" HorizontalAlignment="Center">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,14">
                                 <Border x:Name="CropActionsPanel"
                                         Style="{StaticResource FloatingCardStyle}"
@@ -866,7 +1235,7 @@
                             </StackPanel>
 
                             <Border x:Name="ToolbarIsland"
-                                    Padding="10"
+                                    Padding="12,6"
                                     Background="{DynamicResource IslandBackgroundBrush}"
                                     BorderBrush="{DynamicResource IslandBorderBrush}"
                                     BorderThickness="1"
@@ -948,22 +1317,22 @@
                                                     Background="{DynamicResource PopupPanelBackgroundBrush}"
                                                     BorderBrush="{DynamicResource PopupPanelBorderBrush}"
                                                     BorderThickness="1">
-                                                <StackPanel Width="340">
+                                                <StackPanel Width="368">
                                                     <DockPanel LastChildFill="False">
                                                         <TextBlock DockPanel.Dock="Left"
                                                                    VerticalAlignment="Center"
                                                                    FontSize="13"
                                                                    FontWeight="SemiBold"
                                                                    Foreground="{DynamicResource IslandTextBrush}"
-                                                                   Text="Arrow presets" />
+                                                                   Text="Presets" />
                                                         <Button DockPanel.Dock="Right"
-                                                                Padding="10,6"
+                                                                Width="34"
+                                                                Height="30"
+                                                                Padding="0"
                                                                 Click="SaveArrowPresetButton_Click"
-                                                                Style="{StaticResource EditorSecondaryButtonStyle}">
-                                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                                                <TextBlock Style="{StaticResource EditorGlyphStyle}" Text="&#xE74E;" />
-                                                                <TextBlock Style="{StaticResource EditorIconLabelStyle}" Text="Save current" />
-                                                            </StackPanel>
+                                                                Style="{StaticResource EditorSecondaryButtonStyle}"
+                                                                ToolTip="Save current arrow preset">
+                                                            <TextBlock Style="{StaticResource EditorGlyphStyle}" Margin="0" Text="&#xE74E;" />
                                                         </Button>
                                                     </DockPanel>
                                                     <TextBlock x:Name="ArrowPresetEmptyStateText"
@@ -975,7 +1344,7 @@
                                                     <ScrollViewer Margin="0,12,0,0"
                                                                   HorizontalScrollBarVisibility="Disabled"
                                                                   VerticalScrollBarVisibility="Auto"
-                                                                  MaxHeight="300">
+                                                                  MaxHeight="236">
                                                         <WrapPanel x:Name="ArrowPresetListPanel" />
                                                     </ScrollViewer>
                                                 </StackPanel>
@@ -1032,6 +1401,144 @@
                                                 </Canvas>
                                             </Viewbox>
                                         </ToggleButton>
+                                        <ToggleButton x:Name="HighlightToolButton" Margin="8,0,0,0" Style="{StaticResource EditorTopBarToolButtonStyle}" Checked="ToolButton_Checked" Click="HighlightToolButton_Click" Tag="Highlight" ToolTip="Area highlight">
+                                            <Grid Width="18" Height="18">
+                                                <Viewbox x:Name="HighlightAreaToolIcon" Width="18" Height="18">
+                                                    <Canvas Width="16" Height="16">
+                                                        <Rectangle Width="11.5" Height="7.5" Canvas.Left="2.25" Canvas.Top="4.25"
+                                                                   RadiusX="2"
+                                                                   RadiusY="2"
+                                                                   Fill="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                                   Opacity="0.24" />
+                                                        <Rectangle Width="11.5" Height="7.5" Canvas.Left="2.25" Canvas.Top="4.25"
+                                                                   RadiusX="2"
+                                                                   RadiusY="2"
+                                                                   Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                                   StrokeThickness="1.5" />
+                                                    </Canvas>
+                                                </Viewbox>
+                                                <Viewbox x:Name="HighlightLineToolIcon" Width="18" Height="18" Visibility="Collapsed">
+                                                    <Canvas Width="16" Height="16">
+                                                        <Line X1="2.5" Y1="8" X2="13.5" Y2="8"
+                                                              Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                              StrokeThickness="5"
+                                                              StrokeStartLineCap="Round"
+                                                              StrokeEndLineCap="Round"
+                                                              Opacity="0.25" />
+                                                        <Line X1="2.5" Y1="8" X2="13.5" Y2="8"
+                                                              Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                              StrokeThickness="1.8"
+                                                              StrokeStartLineCap="Round"
+                                                              StrokeEndLineCap="Round" />
+                                                    </Canvas>
+                                                </Viewbox>
+                                                <Viewbox x:Name="HighlightFreehandToolIcon" Width="18" Height="18" Visibility="Collapsed">
+                                                    <Canvas Width="16" Height="16">
+                                                        <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                              StrokeThickness="5"
+                                                              StrokeStartLineCap="Round"
+                                                              StrokeEndLineCap="Round"
+                                                              StrokeLineJoin="Round"
+                                                              Opacity="0.25"
+                                                              Data="M2.2,9.5 C4.3,5.3 6.2,13.2 8.3,8.2 C9.5,5.1 11.5,5.4 13.8,7" />
+                                                        <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                              StrokeThickness="1.8"
+                                                              StrokeStartLineCap="Round"
+                                                              StrokeEndLineCap="Round"
+                                                              StrokeLineJoin="Round"
+                                                              Data="M2.2,9.5 C4.3,5.3 6.2,13.2 8.3,8.2 C9.5,5.1 11.5,5.4 13.8,7" />
+                                                    </Canvas>
+                                                </Viewbox>
+                                            </Grid>
+                                        </ToggleButton>
+                                        <Popup x:Name="HighlightModePopup"
+                                               PlacementTarget="{Binding ElementName=HighlightToolButton}"
+                                               Placement="Top"
+                                               VerticalOffset="-10"
+                                               AllowsTransparency="True"
+                                               PopupAnimation="Fade"
+                                               StaysOpen="False">
+                                            <Border Padding="14"
+                                                    CornerRadius="18"
+                                                    Background="{DynamicResource PopupPanelBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource PopupPanelBorderBrush}"
+                                                    BorderThickness="1">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button Width="44"
+                                                            Height="44"
+                                                            Padding="0"
+                                                            Tag="Region"
+                                                            Click="HighlightModeOption_Click"
+                                                            Style="{StaticResource EditorTopBarButtonStyle}"
+                                                            ToolTip="Area highlight">
+                                                        <Viewbox Width="18" Height="18">
+                                                            <Canvas Width="16" Height="16">
+                                                                <Rectangle Width="11.5" Height="7.5" Canvas.Left="2.25" Canvas.Top="4.25"
+                                                                           RadiusX="2"
+                                                                           RadiusY="2"
+                                                                           Fill="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                                           Opacity="0.24" />
+                                                                <Rectangle Width="11.5" Height="7.5" Canvas.Left="2.25" Canvas.Top="4.25"
+                                                                           RadiusX="2"
+                                                                           RadiusY="2"
+                                                                           Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                                           StrokeThickness="1.5" />
+                                                            </Canvas>
+                                                        </Viewbox>
+                                                    </Button>
+                                                    <Button Width="44"
+                                                            Height="44"
+                                                            Margin="8,0,0,0"
+                                                            Padding="0"
+                                                            Tag="Line"
+                                                            Click="HighlightModeOption_Click"
+                                                            Style="{StaticResource EditorTopBarButtonStyle}"
+                                                            ToolTip="Line highlight">
+                                                        <Viewbox Width="18" Height="18">
+                                                            <Canvas Width="16" Height="16">
+                                                                <Line X1="2.5" Y1="8" X2="13.5" Y2="8"
+                                                                      Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                                      StrokeThickness="5"
+                                                                      StrokeStartLineCap="Round"
+                                                                      StrokeEndLineCap="Round"
+                                                                      Opacity="0.25" />
+                                                                <Line X1="2.5" Y1="8" X2="13.5" Y2="8"
+                                                                      Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                                      StrokeThickness="1.8"
+                                                                      StrokeStartLineCap="Round"
+                                                                      StrokeEndLineCap="Round" />
+                                                            </Canvas>
+                                                        </Viewbox>
+                                                    </Button>
+                                                    <Button Width="44"
+                                                            Height="44"
+                                                            Margin="8,0,0,0"
+                                                            Padding="0"
+                                                            Tag="Freehand"
+                                                            Click="HighlightModeOption_Click"
+                                                            Style="{StaticResource EditorTopBarButtonStyle}"
+                                                            ToolTip="Freehand highlight">
+                                                        <Viewbox Width="18" Height="18">
+                                                            <Canvas Width="16" Height="16">
+                                                                <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                                      StrokeThickness="5"
+                                                                      StrokeStartLineCap="Round"
+                                                                      StrokeEndLineCap="Round"
+                                                                      StrokeLineJoin="Round"
+                                                                      Opacity="0.25"
+                                                                      Data="M2.2,9.5 C4.3,5.3 6.2,13.2 8.3,8.2 C9.5,5.1 11.5,5.4 13.8,7" />
+                                                                <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                                      StrokeThickness="1.8"
+                                                                      StrokeStartLineCap="Round"
+                                                                      StrokeEndLineCap="Round"
+                                                                      StrokeLineJoin="Round"
+                                                                      Data="M2.2,9.5 C4.3,5.3 6.2,13.2 8.3,8.2 C9.5,5.1 11.5,5.4 13.8,7" />
+                                                            </Canvas>
+                                                        </Viewbox>
+                                                    </Button>
+                                                </StackPanel>
+                                            </Border>
+                                        </Popup>
                                         <ToggleButton x:Name="TextToolButton" Margin="8,0,0,0" Style="{StaticResource EditorTopBarToolButtonStyle}" Checked="ToolButton_Checked" Tag="Text" ToolTip="Text">
                                             <TextBlock FontSize="18"
                                                        FontWeight="SemiBold"

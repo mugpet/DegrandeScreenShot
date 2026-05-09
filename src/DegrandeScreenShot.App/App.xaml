@@ -3,14 +3,14 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnMainWindowClose">
     <Application.Resources>
-        <Color x:Key="AppBackgroundColor">#F4F6F3</Color>
-        <Color x:Key="PanelColor">#FCFDFB</Color>
-        <Color x:Key="PanelBorderColor">#D4D9D4</Color>
-        <Color x:Key="AccentColor">#125B50</Color>
-        <Color x:Key="AccentStrongColor">#0B3D36</Color>
-        <Color x:Key="TextColor">#19211E</Color>
-        <Color x:Key="MutedTextColor">#5E6A64</Color>
-        <Color x:Key="CanvasColor">#EEF1EC</Color>
+        <Color x:Key="AppBackgroundColor">#F4F7FB</Color>
+        <Color x:Key="PanelColor">#FFFFFF</Color>
+        <Color x:Key="PanelBorderColor">#D5E0EA</Color>
+        <Color x:Key="AccentColor">#0C8EC5</Color>
+        <Color x:Key="AccentStrongColor">#0A6F9A</Color>
+        <Color x:Key="TextColor">#1D2631</Color>
+        <Color x:Key="MutedTextColor">#6C7987</Color>
+        <Color x:Key="CanvasColor">#ECF1F6</Color>
         <Color x:Key="SelectionStrokeColor">#FF1AA9D8</Color>
         <Color x:Key="OverlayDimColor">#21000000</Color>
 
@@ -29,6 +29,7 @@
             <Setter Property="FontFamily" Value="Segoe UI Variable Display, Segoe UI" />
             <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
             <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
+            <Setter Property="Icon" Value="pack://application:,,,/Assets/AppIcon.ico" />
             <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         </Style>
@@ -68,7 +69,7 @@
             <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#FFF1F4F0" />
+                    <Setter Property="Background" Value="#FFEAF4FA" />
                     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                 </Trigger>
             </Style.Triggers>
@@ -95,7 +96,7 @@
             </Setter>
             <Style.Triggers>
                 <Trigger Property="IsChecked" Value="True">
-                    <Setter Property="Background" Value="#1A125B50" />
+                    <Setter Property="Background" Value="#1A0C8EC5" />
                     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
                 </Trigger>
             </Style.Triggers>

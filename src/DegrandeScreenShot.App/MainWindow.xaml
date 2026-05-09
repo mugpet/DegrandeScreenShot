@@ -12,13 +12,70 @@
         WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         WindowStyle="None"
-        Background="#E8ECE5"
+        Background="{DynamicResource LauncherBackgroundBrush}"
+        Foreground="{DynamicResource LauncherTextBrush}"
         ShowInTaskbar="True">
-    <Grid Background="#E8ECE5">
+    <Window.Resources>
+        <SolidColorBrush x:Key="LauncherBackgroundBrush" Color="#F4F7FB" />
+        <SolidColorBrush x:Key="LauncherPanelBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="LauncherPanelBorderBrush" Color="#D5E0EA" />
+        <SolidColorBrush x:Key="LauncherHeroBrush" Color="#1D2631" />
+        <SolidColorBrush x:Key="LauncherHeroMutedBrush" Color="#AFC0CE" />
+        <SolidColorBrush x:Key="LauncherHeroTextBrush" Color="#F4F7FB" />
+        <SolidColorBrush x:Key="LauncherCardBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="LauncherSubtleCardBrush" Color="#F0F5F9" />
+        <SolidColorBrush x:Key="LauncherTextBrush" Color="#1D2631" />
+        <SolidColorBrush x:Key="LauncherMutedTextBrush" Color="#6C7987" />
+        <SolidColorBrush x:Key="LauncherShortcutBrush" Color="#EAF4FA" />
+        <SolidColorBrush x:Key="LauncherShortcutTextBrush" Color="#0B6F9A" />
+        <SolidColorBrush x:Key="LauncherShortcutWarmBrush" Color="#FDF3E7" />
+        <SolidColorBrush x:Key="LauncherShortcutWarmTextBrush" Color="#A85B1A" />
+        <SolidColorBrush x:Key="LauncherShortcutPurpleBrush" Color="#EFEAF8" />
+        <SolidColorBrush x:Key="LauncherShortcutPurpleTextBrush" Color="#5E4D91" />
+        <SolidColorBrush x:Key="LauncherCloseButtonBrush" Color="#1FFFFFFF" />
+        <SolidColorBrush x:Key="LauncherCloseButtonBorderBrush" Color="#2FFFFFFF" />
+
+        <Style x:Key="LauncherSwitchStyle" TargetType="ToggleButton">
+            <Setter Property="Width" Value="48" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="{DynamicResource LauncherPanelBorderBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LauncherPanelBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="SwitchTrack"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="13">
+                            <Grid>
+                                <Ellipse x:Name="SwitchThumb"
+                                         Width="20"
+                                         Height="20"
+                                         Margin="3"
+                                         HorizontalAlignment="Left"
+                                         Fill="{DynamicResource LauncherPanelBrush}" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="SwitchTrack" Property="Background" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                <Setter TargetName="SwitchThumb" Property="HorizontalAlignment" Value="Right" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid Background="{DynamicResource LauncherBackgroundBrush}">
         <Border Margin="14"
                 Padding="20"
-                Background="#F7FAF6"
-                BorderBrush="#D8DFD9"
+                Background="{DynamicResource LauncherPanelBrush}"
+                BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="24">
             <Border.Effect>
@@ -30,13 +87,14 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Border Padding="18"
                     MouseLeftButtonDown="DragSurface_MouseLeftButtonDown"
-                        Background="#1A2A26"
+                        Background="{DynamicResource LauncherHeroBrush}"
                         CornerRadius="20">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -44,10 +102,10 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock FontSize="14" Foreground="#A8C3B9" Text="Quick capture" />
-                            <TextBlock Margin="0,8,0,0" FontSize="28" FontWeight="SemiBold" Foreground="White" Text="Degrande ScreenShot" />
+                            <TextBlock FontSize="14" Foreground="{DynamicResource LauncherHeroMutedBrush}" Text="Quick capture" />
+                            <TextBlock Margin="0,8,0,0" FontSize="28" FontWeight="SemiBold" Foreground="{DynamicResource LauncherHeroTextBrush}" Text="Degrande ScreenShot" />
                             <TextBlock Margin="0,10,0,0"
-                                       Foreground="#D3DEDA"
+                                       Foreground="{DynamicResource LauncherHeroMutedBrush}"
                                        FontSize="13"
                                        Text="A popup-style launcher for region capture, clipboard copy, and editor handoff across all monitors."
                                        TextWrapping="Wrap" />
@@ -59,8 +117,8 @@
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Top"
                                 Click="CloseWindow_Click"
-                                Background="#1FFFFFFF"
-                                BorderBrush="#2FFFFFFF"
+                                Background="{DynamicResource LauncherCloseButtonBrush}"
+                                BorderBrush="{DynamicResource LauncherCloseButtonBorderBrush}"
                                 BorderThickness="1"
                                 Foreground="White"
                                 Content="X" />
@@ -70,11 +128,16 @@
                 <StackPanel Grid.Row="1" Margin="0,18,0,0" Orientation="Horizontal">
                     <Button Width="176"
                             Click="StartCapture_Click"
+                            Background="{DynamicResource AccentBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}"
                             Style="{StaticResource PrimaryButtonStyle}"
                             Content="Capture Region" />
                     <Button Width="138"
                             Margin="10,0,0,0"
                             Click="OpenEditorDemo_Click"
+                            Background="Transparent"
+                            BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
+                            Foreground="{DynamicResource LauncherTextBrush}"
                             Style="{StaticResource SecondaryButtonStyle}"
                             Content="Demo Editor" />
                 </StackPanel>
@@ -82,92 +145,101 @@
                 <Border Grid.Row="2"
                         Margin="0,18,0,0"
                         Padding="16"
-                        Background="#EFF4EF"
-                        BorderBrush="#D8DFD9"
+                        Background="{DynamicResource LauncherCardBrush}"
+                        BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="18">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock FontWeight="SemiBold" Text="Start with Windows" />
+                            <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Launch quietly in the tray when you sign in." TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ToggleButton x:Name="StartupToggleButton"
+                                      Grid.Column="1"
+                                      Margin="16,0,0,0"
+                                      VerticalAlignment="Center"
+                                      Click="StartupToggleButton_Click"
+                                      Style="{StaticResource LauncherSwitchStyle}" />
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="3"
+                        Margin="0,18,0,0"
+                        Padding="16"
+                        Background="{DynamicResource LauncherSubtleCardBrush}"
+                        BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
                         BorderThickness="1"
                         CornerRadius="18">
                     <StackPanel>
                         <TextBlock FontWeight="SemiBold" Text="Default controls" />
-                        <TextBlock Margin="0,8,0,0" Foreground="{StaticResource MutedTextBrush}" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel." TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel." TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 
-                <TextBlock Grid.Row="3" Margin="0,20,0,0" FontSize="18" FontWeight="SemiBold" Text="Shortcuts" />
+                <TextBlock Grid.Row="4" Margin="0,20,0,0" FontSize="18" FontWeight="SemiBold" Text="Shortcuts" />
 
-                <ScrollViewer Grid.Row="4"
+                <ScrollViewer Grid.Row="5"
                               Margin="0,12,0,0"
                               VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
-                        <Border Margin="0,0,0,12" Padding="16" Background="White" BorderBrush="#D8DFD9" BorderThickness="1" CornerRadius="18">
+                        <Border Margin="0,0,0,12" Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="#E8F2EF" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="#125B50" Text="Ctrl + Shift + 4" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                    <TextBlock FontWeight="SemiBold" Text="Capture with chooser" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}" Text="Freeze all monitors, draw a region, then choose whether to copy it or open it in the editor." TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <Border Margin="0,0,0,12" Padding="16" Background="White" BorderBrush="#D8DFD9" BorderThickness="1" CornerRadius="18">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="#F1F5EA" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="#556B2F" Text="Ctrl + Shift + Alt + 5" />
+                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutBrush}" CornerRadius="12">
+                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutTextBrush}" Text="Ctrl + Shift + Alt + 5" />
                                 </Border>
                                 <StackPanel Grid.Column="1" Margin="14,0,0,0">
                                     <TextBlock FontWeight="SemiBold" Text="Region, then decide" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}" Text="Start region capture directly from the keyboard and keep the post-capture choice visible after selection." TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Start region capture directly from the keyboard and keep the post-capture choice visible after selection." TextWrapping="Wrap" />
                                 </StackPanel>
                             </Grid>
                         </Border>
 
-                        <Border Margin="0,0,0,12" Padding="16" Background="White" BorderBrush="#D8DFD9" BorderThickness="1" CornerRadius="18">
+                        <Border Margin="0,0,0,12" Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="#FDF3E7" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="#A85B1A" Text="Ctrl + Shift + Alt + 6" />
+                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutWarmBrush}" CornerRadius="12">
+                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutWarmTextBrush}" Text="Ctrl + Shift + Alt + 6" />
                                 </Border>
                                 <StackPanel Grid.Column="1" Margin="14,0,0,0">
                                     <TextBlock FontWeight="SemiBold" Text="Region straight to clipboard" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}" Text="Freeze the desktop, draw a region, and send the result straight to the clipboard with no extra prompt." TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Freeze the desktop, draw a region, and send the result straight to the clipboard with no extra prompt." TextWrapping="Wrap" />
                                 </StackPanel>
                             </Grid>
                         </Border>
 
-                        <Border Padding="16" Background="White" BorderBrush="#D8DFD9" BorderThickness="1" CornerRadius="18">
+                        <Border Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="#EDEAF7" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="#5E4D91" Text="Ctrl + Shift + Alt + 7" />
+                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutPurpleBrush}" CornerRadius="12">
+                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutPurpleTextBrush}" Text="Ctrl + Shift + Alt + 7" />
                                 </Border>
                                 <StackPanel Grid.Column="1" Margin="14,0,0,0">
                                     <TextBlock FontWeight="SemiBold" Text="Region straight to editor" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}" Text="Freeze the desktop, draw a region, and open the result in the annotation editor immediately." TextWrapping="Wrap" />
+                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Freeze the desktop, draw a region, and open the result in the annotation editor immediately." TextWrapping="Wrap" />
                                 </StackPanel>
                             </Grid>
                         </Border>
                     </StackPanel>
                 </ScrollViewer>
 
-                <TextBlock Grid.Row="5"
+                <TextBlock Grid.Row="6"
                            Margin="0,18,0,0"
-                           Foreground="{StaticResource MutedTextBrush}"
+                           Foreground="{DynamicResource LauncherMutedTextBrush}"
                            FontSize="12"
                            Text="The launcher opens near the taskbar so it behaves more like a quick popup than a full landing page."
                            TextWrapping="Wrap" />
