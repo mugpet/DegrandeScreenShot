@@ -32,10 +32,12 @@ The launcher registers these global shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl + Shift + Alt + 5` | Capture a region, then keep the post-capture choice visible |
+| `Ctrl + Shift + Alt + 4` | Open the capture launcher |
+| `Ctrl + Shift + Alt + 5` | Open the capture launcher |
 | `Ctrl + Shift + Alt + 6` | Capture a region straight to the clipboard |
 | `Ctrl + Shift + Alt + 7` | Capture a region straight to the editor |
 | `Ctrl + Shift + Alt + 8` | Open the current clipboard contents in the editor |
+| `Ctrl + Shift + Alt + 9` | Capture a scrolling region straight to the editor |
 
 ## Editor Tools
 

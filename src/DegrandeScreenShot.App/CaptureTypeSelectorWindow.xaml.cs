@@ -15,6 +15,7 @@ public partial class CaptureTypeSelectorWindow : Window
     private readonly Point _anchorScreenPoint;
     private readonly EditorPreferencesStore _preferencesStore = new();
     private bool _closingBySelection;
+    private bool _isClosing;
 
     public CaptureTypeSelectorWindow(Point anchorScreenPoint)
     {
@@ -43,7 +44,7 @@ public partial class CaptureTypeSelectorWindow : Window
     {
         if (!_closingBySelection)
         {
-            Close();
+            CloseSelector();
         }
     }
 
@@ -57,12 +58,7 @@ public partial class CaptureTypeSelectorWindow : Window
         switch (e.Key)
         {
             case Key.Escape:
-                Close();
-                e.Handled = true;
-                break;
-            case Key.D5:
-            case Key.NumPad5:
-                SelectAction(CaptureTypeSelection.ChooseAction);
+                CloseSelector();
                 e.Handled = true;
                 break;
             case Key.D6:
@@ -106,9 +102,25 @@ public partial class CaptureTypeSelectorWindow : Window
 
     private void SelectAction(CaptureTypeSelection action)
     {
+        if (_isClosing)
+        {
+            return;
+        }
+
         _closingBySelection = true;
+        _isClosing = true;
         SelectedAction = action;
         DialogResult = true;
+    }
+
+    private void CloseSelector()
+    {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _isClosing = true;
         Close();
     }
 
@@ -215,7 +227,6 @@ public partial class CaptureTypeSelectorWindow : Window
 
 internal enum CaptureTypeSelection
 {
-    ChooseAction,
     CopyRegion,
     OpenEditor,
     ClipboardEditor,

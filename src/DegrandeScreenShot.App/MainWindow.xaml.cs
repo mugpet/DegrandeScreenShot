@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private bool _startHiddenInTray;
     private bool _isUpdatingStartupToggle;
     private bool _hotKeysRegistered;
+    private bool _isCaptureTypeSelectorOpen;
 
     public MainWindow(bool startHiddenInTray = false)
     {
@@ -46,7 +47,7 @@ public partial class MainWindow : Window
         _hotKeyManagers =
         [
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D4, BeginCaptureTypeSelectorFromHotKey),
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D5, BeginPromptCaptureFromHotKey),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D5, BeginCaptureTypeSelectorFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D6, BeginClipboardCaptureFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D7, BeginEditorCaptureFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D8, BeginClipboardEditorFromHotKey),
@@ -290,7 +291,7 @@ public partial class MainWindow : Window
 
     private void StartCapture_Click(object sender, RoutedEventArgs e)
     {
-        StartCapture();
+        ShowCaptureTypeSelector();
     }
 
     private void DragSurface_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -314,14 +315,19 @@ public partial class MainWindow : Window
         HideToTray();
     }
 
-    private void BeginPromptCaptureFromHotKey()
-    {
-        Dispatcher.Invoke(() => StartCapture(CaptureLaunchMode.ChooseAction));
-    }
-
     private void BeginCaptureTypeSelectorFromHotKey()
     {
-        Dispatcher.Invoke(ShowCaptureTypeSelector);
+        Dispatcher.Invoke(() =>
+        {
+            try
+            {
+                ShowCaptureTypeSelector();
+            }
+            catch (Exception exception)
+            {
+                System.Windows.MessageBox.Show(this, exception.Message, "Capture selector failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        });
     }
 
     private void BeginClipboardCaptureFromHotKey()
@@ -342,11 +348,6 @@ public partial class MainWindow : Window
     private void BeginScrollingWindowCaptureFromHotKey()
     {
         Dispatcher.Invoke(StartScrollingWindowCapture);
-    }
-
-    private void StartCapture()
-    {
-        StartCapture(CaptureLaunchMode.ChooseAction);
     }
 
     private void StartCapture(CaptureLaunchMode launchMode)
@@ -465,30 +466,40 @@ public partial class MainWindow : Window
 
     private void ShowCaptureTypeSelector()
     {
-        var selector = new CaptureTypeSelectorWindow(GetCursorPosition());
-        var result = selector.ShowDialog();
-        if (result != true || selector.SelectedAction is not { } action)
+        if (_isCaptureTypeSelectorOpen)
         {
             return;
         }
 
-        switch (action)
+        _isCaptureTypeSelectorOpen = true;
+        try
         {
-            case CaptureTypeSelection.ChooseAction:
-                StartCapture(CaptureLaunchMode.ChooseAction);
-                break;
-            case CaptureTypeSelection.CopyRegion:
-                StartCapture(CaptureLaunchMode.CopyToClipboard);
-                break;
-            case CaptureTypeSelection.OpenEditor:
-                StartCapture(CaptureLaunchMode.OpenEditor);
-                break;
-            case CaptureTypeSelection.ClipboardEditor:
-                OpenClipboardInEditor();
-                break;
-            case CaptureTypeSelection.ScrollingWindow:
-                StartScrollingWindowCapture();
-                break;
+            var selector = new CaptureTypeSelectorWindow(GetCursorPosition());
+            var result = selector.ShowDialog();
+            if (result != true || selector.SelectedAction is not { } action)
+            {
+                return;
+            }
+
+            switch (action)
+            {
+                case CaptureTypeSelection.CopyRegion:
+                    StartCapture(CaptureLaunchMode.CopyToClipboard);
+                    break;
+                case CaptureTypeSelection.OpenEditor:
+                    StartCapture(CaptureLaunchMode.OpenEditor);
+                    break;
+                case CaptureTypeSelection.ClipboardEditor:
+                    OpenClipboardInEditor();
+                    break;
+                case CaptureTypeSelection.ScrollingWindow:
+                    StartScrollingWindowCapture();
+                    break;
+            }
+        }
+        finally
+        {
+            _isCaptureTypeSelectorOpen = false;
         }
     }
 
@@ -617,7 +628,7 @@ public partial class MainWindow : Window
     {
         _isExplicitExit = true;
         _trayIcon.Visible = false;
-        Close();
+        System.Windows.Application.Current.Shutdown();
     }
 
     private void OpenEditorDemo_Click(object sender, RoutedEventArgs e)

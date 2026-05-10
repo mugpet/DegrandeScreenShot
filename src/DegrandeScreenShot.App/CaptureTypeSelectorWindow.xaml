@@ -99,19 +99,12 @@
                 <StackPanel Margin="2,0,16,0" VerticalAlignment="Center">
                     <TextBlock FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" Text="Capture" />
                     <TextBlock Margin="0,2,0,0" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Select type" />
+                    <TextBlock Margin="0,2,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" Text="Ctrl+Shift+Alt+4 / 5" />
                 </StackPanel>
 
                 <Border Width="1" Height="42" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
 
-                <Button Click="ActionButton_Click" Tag="ChooseAction" Style="{StaticResource CaptureTypePrimaryButtonStyle}" ToolTip="Region, then decide">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8B7;" />
-                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Decide" />
-                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+5" />
-                    </StackPanel>
-                </Button>
-
-                <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="CopyRegion" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Region straight to clipboard">
+                <Button Click="ActionButton_Click" Tag="CopyRegion" Style="{StaticResource CaptureTypePrimaryButtonStyle}" ToolTip="Region straight to clipboard">
                     <StackPanel>
                         <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8C8;" />
                         <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Copy" />
