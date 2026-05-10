@@ -45,6 +45,7 @@ public partial class MainWindow : Window
         UpdateStartupToggle();
         _hotKeyManagers =
         [
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D4, BeginCaptureTypeSelectorFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D5, BeginPromptCaptureFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D6, BeginClipboardCaptureFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D7, BeginEditorCaptureFromHotKey),
@@ -62,6 +63,7 @@ public partial class MainWindow : Window
         _trayIcon = CreateTrayIcon();
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
+        PreviewKeyDown += MainWindow_PreviewKeyDown;
         StateChanged += MainWindow_StateChanged;
         Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
@@ -135,6 +137,17 @@ public partial class MainWindow : Window
             Opacity = 1;
             _startHiddenInTray = false;
         }
+    }
+
+    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape)
+        {
+            return;
+        }
+
+        HideToTray();
+        e.Handled = true;
     }
 
     private void MainWindow_StateChanged(object? sender, EventArgs e)
@@ -306,6 +319,11 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(() => StartCapture(CaptureLaunchMode.ChooseAction));
     }
 
+    private void BeginCaptureTypeSelectorFromHotKey()
+    {
+        Dispatcher.Invoke(ShowCaptureTypeSelector);
+    }
+
     private void BeginClipboardCaptureFromHotKey()
     {
         Dispatcher.Invoke(() => StartCapture(CaptureLaunchMode.CopyToClipboard));
@@ -394,17 +412,17 @@ public partial class MainWindow : Window
 
             MoveCursorToPrimaryScreen();
             var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
-            var overlay = new CaptureOverlayWindow(captureFrame, CaptureLaunchMode.OpenEditor, CaptureSelectionMode.Window);
+            var overlay = new CaptureOverlayWindow(captureFrame, CaptureLaunchMode.OpenEditor, CaptureSelectionMode.ScrollTarget);
             overlay.ContentRendered += (_, _) => RestoreCursor();
             var result = overlay.ShowDialog();
             RestoreCursor();
 
-            if (result != true || overlay.SelectedWindow is null)
+            if (result != true || overlay.SelectedScrollTarget is not { } scrollTarget)
             {
                 return;
             }
 
-            var image = _screenCaptureService.CaptureScrollingWindow(overlay.SelectedWindow.Handle);
+            var image = _screenCaptureService.CaptureScrollingWindow(scrollTarget.Window.Handle, ToScreenRectangle(captureFrame, scrollTarget.Bounds));
             ShowCapturePreview(image);
             OpenEditor(image);
         }
@@ -434,6 +452,44 @@ public partial class MainWindow : Window
         var editor = new EditorWindow(image);
         editor.Show();
         editor.Activate();
+    }
+
+    private static System.Drawing.Rectangle ToScreenRectangle(CaptureFrame captureFrame, DegrandeScreenShot.Core.PixelRect overlayRect)
+    {
+        return new System.Drawing.Rectangle(
+            overlayRect.X + captureFrame.VirtualLeft,
+            overlayRect.Y + captureFrame.VirtualTop,
+            overlayRect.Width,
+            overlayRect.Height);
+    }
+
+    private void ShowCaptureTypeSelector()
+    {
+        var selector = new CaptureTypeSelectorWindow(GetCursorPosition());
+        var result = selector.ShowDialog();
+        if (result != true || selector.SelectedAction is not { } action)
+        {
+            return;
+        }
+
+        switch (action)
+        {
+            case CaptureTypeSelection.ChooseAction:
+                StartCapture(CaptureLaunchMode.ChooseAction);
+                break;
+            case CaptureTypeSelection.CopyRegion:
+                StartCapture(CaptureLaunchMode.CopyToClipboard);
+                break;
+            case CaptureTypeSelection.OpenEditor:
+                StartCapture(CaptureLaunchMode.OpenEditor);
+                break;
+            case CaptureTypeSelection.ClipboardEditor:
+                OpenClipboardInEditor();
+                break;
+            case CaptureTypeSelection.ScrollingWindow:
+                StartScrollingWindowCapture();
+                break;
+        }
     }
 
     private void ShowLauncher()

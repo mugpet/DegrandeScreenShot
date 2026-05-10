@@ -176,7 +176,7 @@
                         CornerRadius="18">
                     <StackPanel>
                         <TextBlock FontWeight="SemiBold" Text="Default controls" />
-                        <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel. Use Ctrl + Shift + Alt + 9 to pick a window and stitch a full scrolling capture into the editor." TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel. Use Ctrl + Shift + Alt + 4 to open the capture selector island, or Ctrl + Shift + Alt + 9 to stitch a scrolling window into the editor." TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 
@@ -187,6 +187,22 @@
                               VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
+                        <Border Margin="0,0,0,12" Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutPurpleBrush}" CornerRadius="12">
+                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutPurpleTextBrush}" Text="Ctrl + Shift + Alt + 4" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                                    <TextBlock FontWeight="SemiBold" Text="Capture selector island" />
+                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Open a compact toolbar-style selector on the current monitor so you can choose decide, copy, edit, clipboard, or scrolling capture." TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
                         <Border Margin="0,0,0,12" Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
                             <Grid>
                                 <Grid.ColumnDefinitions>

@@ -19,12 +19,24 @@ public sealed class ScreenCaptureService
     private const int WheelScrollDownNotches = 2;
     private const int WheelScrollToTopNotches = 8;
     private const int MaximumScrollToTopAttempts = 80;
+    private const int CursorScrollBarEdgePadding = 6;
     private const int HorizontalAnalysisBandPercent = 30;
     private const int MinimumAnalysisWidth = 96;
+    private const int RowSignatureBuckets = 16;
+    private const int RowProfileBuckets = 64;
+    private const int RowProfileSimilarityThreshold = 512;
+    private const double VerticalShiftAcceptanceRatio = 0.6;
+    private const double MaximumAcceptableShiftSad = 1500;
+    private const double RequiredProfileSmallOverlapRatio = 0.65;
+    private const double RequiredProfileLargeOverlapRatio = 0.55;
+    private const double RequiredProfileVeryLargeOverlapRatio = 0.40;
+    private const int ProfileLargeOverlapRowThreshold = 200;
+    private const int ProfileVeryLargeOverlapRowThreshold = 800;
     private const int MaximumIncomingOffsetRows = 160;
     private const int ScrollIndicatorWidth = 24;
     private const int ScrollIndicatorChangedRowsThreshold = 4;
-    private const int EstimatedPageDownOverlapPercent = 12;
+    private const int MinimumContentScrollOverlapPercent = 8;
+    private const int EstimatedPageDownOverlapPercent = 58;
     private const int MinimumEstimatedPageDownOverlapRows = 60;
     private static readonly TimeSpan FocusDelay = TimeSpan.FromMilliseconds(150);
     private const int ScrollSettleInitialMs = 120;
@@ -124,7 +136,25 @@ public sealed class ScreenCaptureService
 
         RestoreAndActivateWindow(windowHandle);
         var windowBounds = GetWindowBounds(windowHandle);
+        return CaptureScrollingWindow(windowHandle, windowBounds);
+    }
+
+    public BitmapSource CaptureScrollingWindow(IntPtr windowHandle, Rectangle captureBounds)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("No window was selected.");
+        }
+
+        RestoreAndActivateWindow(windowHandle);
+        var windowBounds = GetWindowBounds(windowHandle);
         EnsureWindowIsVisibleOnDesktop(windowBounds);
+        var scrollCaptureBounds = Rectangle.Intersect(windowBounds, captureBounds);
+        if (scrollCaptureBounds.Width <= 0 || scrollCaptureBounds.Height <= 0)
+        {
+            throw new InvalidOperationException("The selected scroll area is not visible inside the selected window.");
+        }
+
         SetWindowTopMost(windowHandle, true);
         var originalCursor = GetCursorPosition();
 
@@ -132,20 +162,20 @@ public sealed class ScreenCaptureService
         {
             ThrowIfEscapePressed();
             RestoreAndActivateWindow(windowHandle);
-            PinCursorOverWindowContent(windowBounds);
-            ScrollToTop(windowBounds);
-            using var topFrame = CaptureScreenRectangle(windowBounds);
+            PositionCursorOnScrollBarEdge(scrollCaptureBounds);
+            ScrollToTop(scrollCaptureBounds);
+            using var topFrame = CaptureScreenRectangleAtScrollBarEdge(scrollCaptureBounds);
 
             try
             {
-                using var secondFrame = CaptureNextScrolledFrame(windowHandle, windowBounds, topFrame);
+                using var secondFrame = CaptureNextScrolledFrame(windowHandle, scrollCaptureBounds, topFrame);
                 if (BitmapsEqual(topFrame, secondFrame))
                 {
                     throw new InvalidOperationException("The selected window did not scroll. Try selecting a scrollable browser content area.");
                 }
 
                 var viewport = DetermineScrollableViewport(topFrame, secondFrame);
-                using var stitchedBitmap = StitchScrollingFrames(windowHandle, windowBounds, viewport, topFrame, secondFrame);
+                using var stitchedBitmap = StitchScrollingFrames(windowHandle, scrollCaptureBounds, viewport, topFrame, secondFrame);
                 return ConvertToBitmapSource(stitchedBitmap);
             }
             catch (OperationCanceledException)
@@ -155,7 +185,7 @@ public sealed class ScreenCaptureService
         }
         finally
         {
-            ReleasePinnedCursor(originalCursor);
+            RestoreCursor(originalCursor);
             SetWindowTopMost(windowHandle, false);
         }
     }
@@ -206,53 +236,45 @@ public sealed class ScreenCaptureService
     {
         using var firstViewport = CopyRegion(topFrame, viewport);
         var stitched = CreateInitialStitchedBitmap(topFrame, viewport);
-        var previousRows = ComputeRowHashes(firstViewport, GetRowAnalysisBounds(firstViewport.Width, firstViewport.Height));
+        var previousProfiles = ComputeRowProfiles(firstViewport, GetRowAnalysisBounds(firstViewport.Width, firstViewport.Height));
         Bitmap currentFullFrame = CopyBitmap(secondFrame);
         var lastAppendStartRow = EstimatePageDownAppendStartRow(firstViewport.Height);
+        var diagnosticTrace = new System.Text.StringBuilder();
+        diagnosticTrace.AppendLine($"viewport={viewport} analysisBounds={GetRowAnalysisBounds(firstViewport.Width, firstViewport.Height)}");
 
         try
         {
             for (var frameIndex = 0; frameIndex < MaximumScrollFrames; frameIndex++)
             {
                 using var currentViewport = CopyRegion(currentFullFrame, viewport);
-                var currentRows = ComputeRowHashes(currentViewport, GetRowAnalysisBounds(currentViewport.Width, currentViewport.Height));
-                if (previousRows.SequenceEqual(currentRows))
+                var currentProfiles = ComputeRowProfiles(currentViewport, GetRowAnalysisBounds(currentViewport.Width, currentViewport.Height));
+                if (RowProfilesIdentical(previousProfiles, currentProfiles))
                 {
+                    diagnosticTrace.AppendLine($"frame {frameIndex}: identical profiles, breaking");
                     break;
                 }
 
-                var minimumOverlapRows = Math.Max(MinimumOverlapRows, Math.Max(1, currentRows.Length / 20));
-                var maxIncomingOffset = Math.Min(MaximumIncomingOffsetRows, Math.Max(0, currentRows.Length / 5));
-                var overlap = ScrollCaptureStitcher.FindBestVerticalOverlap(previousRows, currentRows, minimumOverlapRows, maxIncomingOffset);
-                if (overlap.OverlapRows == 0)
+                var shift = FindBestVerticalShift(previousProfiles, currentProfiles, out var bestSad, out var baselineSad);
+                diagnosticTrace.AppendLine($"frame {frameIndex}: shift={shift} bestSad={bestSad:F1} baselineSad={baselineSad:F1}");
+
+                int appendStartRow;
+                if (shift > 0)
+                {
+                    appendStartRow = currentViewport.Height - shift;
+                }
+                else
                 {
                     if (lastAppendStartRow <= 0 || lastAppendStartRow >= currentViewport.Height)
                     {
-                        DumpScrollDiagnostics(topFrame, secondFrame, viewport, previousRows, currentRows, minimumOverlapRows, maxIncomingOffset);
+                        DumpScrollDiagnostics(topFrame, secondFrame, viewport, previousProfiles, currentProfiles, diagnosticTrace.ToString());
                         throw new InvalidOperationException("Could not match consecutive scroll captures. Try selecting a browser window with visible page content.");
                     }
-
-                    stitched = AppendBitmap(stitched, currentViewport, lastAppendStartRow);
-                    previousRows = currentRows;
-                    if (IsEscapePressed())
-                    {
-                        return stitched;
-                    }
-
-                    using var fallbackNextFullFrame = CaptureNextScrolledFrame(windowHandle, windowBounds, currentFullFrame);
-                    if (!ScrollPositionChanged(currentFullFrame, fallbackNextFullFrame))
-                    {
-                        break;
-                    }
-
-                    currentFullFrame.Dispose();
-                    currentFullFrame = CopyBitmap(fallbackNextFullFrame);
-                    continue;
+                    appendStartRow = lastAppendStartRow;
                 }
 
-                stitched = AppendBitmap(stitched, currentViewport, overlap.AppendStartRow);
-                lastAppendStartRow = overlap.AppendStartRow;
-                previousRows = currentRows;
+                stitched = AppendBitmap(stitched, currentViewport, appendStartRow);
+                lastAppendStartRow = appendStartRow;
+                previousProfiles = currentProfiles;
                 if (IsEscapePressed())
                 {
                     return stitched;
@@ -261,6 +283,7 @@ public sealed class ScreenCaptureService
                 using var nextFullFrame = CaptureNextScrolledFrame(windowHandle, windowBounds, currentFullFrame);
                 if (!ScrollPositionChanged(currentFullFrame, nextFullFrame))
                 {
+                    diagnosticTrace.AppendLine($"frame {frameIndex}: no further scroll, breaking");
                     break;
                 }
 
@@ -268,6 +291,7 @@ public sealed class ScreenCaptureService
                 currentFullFrame = CopyBitmap(nextFullFrame);
             }
 
+            DumpScrollDiagnostics(topFrame, secondFrame, viewport, previousProfiles, previousProfiles, diagnosticTrace.ToString());
             return stitched;
         }
         catch (OperationCanceledException)
@@ -298,16 +322,13 @@ public sealed class ScreenCaptureService
 
     private static ulong[] ComputeRowHashes(Bitmap bitmap, Rectangle analysisBounds)
     {
-        var rowBytes = analysisBounds.Width * 4;
         var hashes = new ulong[analysisBounds.Height];
-        var buffer = new byte[rowBytes];
         var data = bitmap.LockBits(analysisBounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
         try
         {
             for (var row = 0; row < analysisBounds.Height; row++)
             {
-                Marshal.Copy(data.Scan0 + (row * data.Stride), buffer, 0, rowBytes);
-                hashes[row] = ComputeHash(buffer);
+                hashes[row] = ComputePerceptualRowSignature(data, analysisBounds.Width, row);
             }
         }
         finally
@@ -316,6 +337,34 @@ public sealed class ScreenCaptureService
         }
 
         return hashes;
+    }
+
+    private static ulong ComputePerceptualRowSignature(BitmapData data, int width, int row)
+    {
+        Span<int> bucketTotals = stackalloc int[RowSignatureBuckets];
+        Span<int> bucketCounts = stackalloc int[RowSignatureBuckets];
+        var rowPointer = data.Scan0 + (row * data.Stride);
+        for (var x = 0; x < width; x++)
+        {
+            var pixelOffset = x * 4;
+            var blue = Marshal.ReadByte(rowPointer, pixelOffset);
+            var green = Marshal.ReadByte(rowPointer, pixelOffset + 1);
+            var red = Marshal.ReadByte(rowPointer, pixelOffset + 2);
+            var luminance = ((red * 77) + (green * 150) + (blue * 29)) >> 8;
+            var bucket = Math.Min(RowSignatureBuckets - 1, x * RowSignatureBuckets / width);
+            bucketTotals[bucket] += luminance;
+            bucketCounts[bucket]++;
+        }
+
+        ulong signature = 0;
+        for (var bucket = 0; bucket < RowSignatureBuckets; bucket++)
+        {
+            var average = bucketCounts[bucket] == 0 ? 255 : bucketTotals[bucket] / bucketCounts[bucket];
+            var quantized = (ulong)Math.Clamp(average / 16, 0, 15);
+            signature |= quantized << (bucket * 4);
+        }
+
+        return signature;
     }
 
     private static Rectangle GetRowAnalysisBounds(int width, int height)
@@ -330,21 +379,178 @@ public sealed class ScreenCaptureService
         return new Rectangle(analysisLeft, 0, analysisWidth, height);
     }
 
-    private static ulong ComputeHash(byte[] buffer)
+    private static byte[][] ComputeRowProfiles(Bitmap bitmap, Rectangle analysisBounds)
     {
-        const ulong offsetBasis = 14695981039346656037;
-        const ulong prime = 1099511628211;
-        var hash = offsetBasis;
-        foreach (var value in buffer)
+        var profiles = new byte[analysisBounds.Height][];
+        var data = bitmap.LockBits(analysisBounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+        try
         {
-            hash ^= value;
-            hash *= prime;
+            for (var row = 0; row < analysisBounds.Height; row++)
+            {
+                profiles[row] = ComputeRowProfile(data, analysisBounds.Width, row);
+            }
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
         }
 
-        return hash;
+        return profiles;
     }
 
-    private static void DumpScrollDiagnostics(Bitmap topFrame, Bitmap secondFrame, Rectangle viewport, ulong[] previousRows, ulong[] currentRows, int minimumOverlapRows, int maxIncomingOffset)
+    private static byte[] ComputeRowProfile(BitmapData data, int width, int row)
+    {
+        var buckets = RowProfileBuckets;
+        Span<int> bucketTotals = stackalloc int[buckets];
+        Span<int> bucketCounts = stackalloc int[buckets];
+        var rowPointer = data.Scan0 + (row * data.Stride);
+        for (var x = 0; x < width; x++)
+        {
+            var pixelOffset = x * 4;
+            var blue = Marshal.ReadByte(rowPointer, pixelOffset);
+            var green = Marshal.ReadByte(rowPointer, pixelOffset + 1);
+            var red = Marshal.ReadByte(rowPointer, pixelOffset + 2);
+            var luminance = ((red * 77) + (green * 150) + (blue * 29)) >> 8;
+            var bucket = Math.Min(buckets - 1, x * buckets / width);
+            bucketTotals[bucket] += luminance;
+            bucketCounts[bucket]++;
+        }
+
+        var profile = new byte[buckets];
+        for (var bucket = 0; bucket < buckets; bucket++)
+        {
+            var average = bucketCounts[bucket] == 0 ? 255 : bucketTotals[bucket] / bucketCounts[bucket];
+            profile[bucket] = (byte)Math.Clamp(average, 0, 255);
+        }
+
+        return profile;
+    }
+
+    private static int RowProfileSad(byte[] left, byte[] right)
+    {
+        var sum = 0;
+        for (var i = 0; i < left.Length; i++)
+        {
+            sum += Math.Abs(left[i] - right[i]);
+        }
+        return sum;
+    }
+
+    private static bool RowProfilesIdentical(byte[][] left, byte[][] right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+        for (var i = 0; i < left.Length; i++)
+        {
+            for (var b = 0; b < left[i].Length; b++)
+            {
+                if (left[i][b] != right[i][b])
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static VerticalOverlapMatch FindBestVerticalOverlapBySimilarity(byte[][] previousProfiles, byte[][] currentProfiles, int minOverlapRows, int maxIncomingOffsetRows)
+    {
+        var best = VerticalOverlapMatch.None;
+        var maxOffset = Math.Min(maxIncomingOffsetRows, Math.Max(0, currentProfiles.Length - minOverlapRows));
+        for (var incomingOffset = 0; incomingOffset <= maxOffset; incomingOffset++)
+        {
+            var available = currentProfiles.Length - incomingOffset;
+            var maxOverlap = Math.Min(previousProfiles.Length, available);
+            for (var overlap = maxOverlap; overlap >= minOverlapRows; overlap--)
+            {
+                var startIndex = previousProfiles.Length - overlap;
+                var similar = 0;
+                for (var offset = 0; offset < overlap; offset++)
+                {
+                    if (RowProfileSad(previousProfiles[startIndex + offset], currentProfiles[incomingOffset + offset]) <= RowProfileSimilarityThreshold)
+                    {
+                        similar++;
+                    }
+                }
+
+                var requiredRatio = overlap switch
+                {
+                    >= ProfileVeryLargeOverlapRowThreshold => RequiredProfileVeryLargeOverlapRatio,
+                    >= ProfileLargeOverlapRowThreshold => RequiredProfileLargeOverlapRatio,
+                    _ => RequiredProfileSmallOverlapRatio,
+                };
+                if (similar >= Math.Ceiling(overlap * requiredRatio))
+                {
+                    if (overlap > best.OverlapRows)
+                    {
+                        best = new VerticalOverlapMatch(overlap, incomingOffset, (double)similar / overlap);
+                    }
+                    break;
+                }
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Estimates the vertical pixel shift between two consecutive viewports by minimizing
+    /// average sum-of-absolute-differences across all aligned row profiles. Returns 0 when
+    /// the best shift is not significantly better than the no-shift baseline.
+    /// </summary>
+    private static int FindBestVerticalShift(byte[][] previousProfiles, byte[][] currentProfiles, out double bestSad, out double baselineSad)
+    {
+        var height = Math.Min(previousProfiles.Length, currentProfiles.Length);
+        baselineSad = AverageProfileSad(previousProfiles, currentProfiles, 0, height);
+        bestSad = baselineSad;
+
+        var minShift = Math.Max(MinimumOverlapRows, height / 50);
+        var maxShift = height - MinimumOverlapRows;
+        if (maxShift <= minShift)
+        {
+            return 0;
+        }
+
+        var bestShift = 0;
+        for (var shift = minShift; shift <= maxShift; shift++)
+        {
+            var overlap = height - shift;
+            var sad = AverageProfileSad(previousProfiles, currentProfiles, shift, overlap);
+            if (sad < bestSad)
+            {
+                bestSad = sad;
+                bestShift = shift;
+            }
+        }
+
+        // Require the best alignment to be meaningfully better than the unshifted baseline,
+        // otherwise the page likely did not scroll or the analysis band is mostly background.
+        if (bestShift == 0 || bestSad > baselineSad * VerticalShiftAcceptanceRatio || bestSad > MaximumAcceptableShiftSad)
+        {
+            return 0;
+        }
+
+        return bestShift;
+    }
+
+    private static double AverageProfileSad(byte[][] previousProfiles, byte[][] currentProfiles, int shift, int overlap)
+    {
+        if (overlap <= 0)
+        {
+            return double.MaxValue;
+        }
+
+        long total = 0;
+        for (var i = 0; i < overlap; i++)
+        {
+            total += RowProfileSad(previousProfiles[shift + i], currentProfiles[i]);
+        }
+        return (double)total / overlap;
+    }
+
+    private static void DumpScrollDiagnostics(Bitmap topFrame, Bitmap secondFrame, Rectangle viewport, byte[][] previousProfiles, byte[][] currentProfiles, string trace)
     {
         try
         {
@@ -356,36 +562,44 @@ public sealed class ScreenCaptureService
             vp0.Save(Path.Combine(dir, "dss_vp0.png"), ImageFormat.Png);
             vp1.Save(Path.Combine(dir, "dss_vp1.png"), ImageFormat.Png);
 
-            // Brute-force best match ratio at any overlap size (ignoring minimumOverlapRows)
-            var bestRatio = 0.0;
-            var bestOverlap = 0;
-            for (var overlap = 1; overlap <= Math.Min(previousRows.Length, currentRows.Length); overlap++)
+            var height = Math.Min(previousProfiles.Length, currentProfiles.Length);
+            var baselineSad = AverageProfileSad(previousProfiles, currentProfiles, 0, height);
+            var minShift = Math.Max(MinimumOverlapRows, height / 50);
+            var maxShift = height - MinimumOverlapRows;
+            var bestSad = baselineSad;
+            var bestShift = 0;
+            var samples = new System.Text.StringBuilder();
+            for (var shift = minShift; shift <= maxShift; shift++)
             {
-                var startIndex = previousRows.Length - overlap;
-                var matches = 0;
-                for (var offset = 0; offset < overlap; offset++)
+                var overlap = height - shift;
+                var sad = AverageProfileSad(previousProfiles, currentProfiles, shift, overlap);
+                if (sad < bestSad)
                 {
-                    if (previousRows[startIndex + offset] == currentRows[offset])
-                        matches++;
+                    bestSad = sad;
+                    bestShift = shift;
                 }
-                var ratio = (double)matches / overlap;
-                if (ratio > bestRatio) { bestRatio = ratio; bestOverlap = overlap; }
+                if (shift % 50 == 0)
+                {
+                    samples.AppendLine($"  shift={shift} sad={sad:F1}");
+                }
             }
 
             var log = $"""
                 dss_scroll_diagnostics
-                scrollMethod=Ctrl+Home/PageDown/WheelFallback
                 viewport={viewport}
                 topFrame={topFrame.Width}x{topFrame.Height}
                 secondFrame={secondFrame.Width}x{secondFrame.Height}
                 vpWidth={vp0.Width} vpHeight={vp0.Height}
                 analysisBounds={GetRowAnalysisBounds(vp0.Width, vp0.Height)}
-                previousRows.Length={previousRows.Length}
-                currentRows.Length={currentRows.Length}
-                minimumOverlapRows={minimumOverlapRows}
-                maxIncomingOffset={maxIncomingOffset}
-                RequiredMatchRatio=0.82 small / 0.75 large / 0.50 very large
-                bestBruteForceOverlap={bestOverlap} ratio={bestRatio:P1}
+                profilesLen={previousProfiles.Length}
+                profileBuckets={RowProfileBuckets}
+                baselineSad(noShift)={baselineSad:F1}
+                bestShift={bestShift} bestSad={bestSad:F1} ratio={(baselineSad > 0 ? bestSad / baselineSad : 0):F3}
+                acceptanceRatio={VerticalShiftAcceptanceRatio} maxAcceptableSad={MaximumAcceptableShiftSad}
+                ---trace---
+                {trace}
+                ---samples---
+                {samples}
                 """;
             File.WriteAllText(Path.Combine(dir, "dss_log.txt"), log);
         }
@@ -469,7 +683,9 @@ public sealed class ScreenCaptureService
         }
 
         var analysisBounds = GetRowAnalysisBounds(first.Width, first.Height);
-        return ComputeRowHashes(first, analysisBounds).SequenceEqual(ComputeRowHashes(second, analysisBounds));
+        var firstProfiles = ComputeRowProfiles(first, analysisBounds);
+        var secondProfiles = ComputeRowProfiles(second, analysisBounds);
+        return CountSimilarRows(firstProfiles, secondProfiles) >= firstProfiles.Length - 2;
     }
 
     private static bool ScrollPositionChanged(Bitmap before, Bitmap after)
@@ -479,25 +695,26 @@ public sealed class ScreenCaptureService
             return true;
         }
 
-        var indicatorBounds = GetScrollIndicatorBounds(before.Width, before.Height);
-        var beforeRows = ComputeRowHashes(before, indicatorBounds);
-        var afterRows = ComputeRowHashes(after, indicatorBounds);
-        var changedRows = 0;
-        for (var index = 0; index < beforeRows.Length; index++)
-        {
-            if (beforeRows[index] == afterRows[index])
-            {
-                continue;
-            }
+        var analysisBounds = GetRowAnalysisBounds(before.Width, before.Height);
+        var beforeProfiles = ComputeRowProfiles(before, analysisBounds);
+        var afterProfiles = ComputeRowProfiles(after, analysisBounds);
+        var similarRows = CountSimilarRows(beforeProfiles, afterProfiles);
+        var threshold = Math.Max(2, beforeProfiles.Length / 50);
+        return (beforeProfiles.Length - similarRows) > threshold;
+    }
 
-            changedRows++;
-            if (changedRows >= ScrollIndicatorChangedRowsThreshold)
+    private static int CountSimilarRows(byte[][] left, byte[][] right)
+    {
+        var count = 0;
+        var rowCount = Math.Min(left.Length, right.Length);
+        for (var i = 0; i < rowCount; i++)
+        {
+            if (RowProfileSad(left[i], right[i]) <= RowProfileSimilarityThreshold)
             {
-                return true;
+                count++;
             }
         }
-
-        return false;
+        return count;
     }
 
     private static Rectangle GetScrollIndicatorBounds(int width, int height)
@@ -510,6 +727,17 @@ public sealed class ScreenCaptureService
     {
         var estimatedOverlap = Math.Max(MinimumEstimatedPageDownOverlapRows, viewportHeight * EstimatedPageDownOverlapPercent / 100);
         return Math.Clamp(estimatedOverlap, MinimumOverlapRows, Math.Max(MinimumOverlapRows, viewportHeight - 1));
+    }
+
+    private static int NormalizeAppendStartRow(int appendStartRow, double matchRatio, int viewportHeight)
+    {
+        var estimatedPageDownAppendStartRow = EstimatePageDownAppendStartRow(viewportHeight);
+        if (appendStartRow < estimatedPageDownAppendStartRow && matchRatio < 0.95)
+        {
+            return estimatedPageDownAppendStartRow;
+        }
+
+        return appendStartRow;
     }
 
     private static Rectangle GetWindowBounds(IntPtr windowHandle)
@@ -542,16 +770,21 @@ public sealed class ScreenCaptureService
             throw new InvalidOperationException("The selected window is not visible.");
         }
 
+        var desktopBounds = GetVirtualDesktopBounds();
+        if (!desktopBounds.Contains(bounds))
+        {
+            throw new InvalidOperationException("The selected window must be fully visible on screen for scrolling capture.");
+        }
+    }
+
+    private static Rectangle GetVirtualDesktopBounds()
+    {
         var screens = Screen.AllScreens;
         var desktopLeft = screens.Min(screen => screen.Bounds.Left);
         var desktopTop = screens.Min(screen => screen.Bounds.Top);
         var desktopRight = screens.Max(screen => screen.Bounds.Right);
         var desktopBottom = screens.Max(screen => screen.Bounds.Bottom);
-        var desktopBounds = Rectangle.FromLTRB(desktopLeft, desktopTop, desktopRight, desktopBottom);
-        if (!desktopBounds.Contains(bounds))
-        {
-            throw new InvalidOperationException("The selected window must be fully visible on screen for scrolling capture.");
-        }
+        return Rectangle.FromLTRB(desktopLeft, desktopTop, desktopRight, desktopBottom);
     }
 
     private static void RestoreAndActivateWindow(IntPtr windowHandle)
@@ -561,27 +794,12 @@ public sealed class ScreenCaptureService
         SleepWithCancellation((int)FocusDelay.TotalMilliseconds);
     }
 
-    private static void PositionCursorOverWindowContent(Rectangle bounds)
+    private static void PositionCursorOnScrollBarEdge(Rectangle bounds)
     {
-        var focusX = bounds.Left + (bounds.Width / 2);
-        var focusY = bounds.Top + (bounds.Height * FocusPointVerticalPercent / 100);
+        var scrollbarOffset = Math.Min(Math.Max(CursorScrollBarEdgePadding, ScrollIndicatorWidth / 2), Math.Max(1, bounds.Width / 3));
+        var focusX = Math.Clamp(bounds.Right - scrollbarOffset, bounds.Left, bounds.Right - 1);
+        var focusY = Math.Clamp(bounds.Top + (bounds.Height * FocusPointVerticalPercent / 100), bounds.Top, bounds.Bottom - 1);
         SetCursorPos(focusX, focusY);
-        SleepWithCancellation((int)FocusDelay.TotalMilliseconds);
-    }
-
-    private static void PinCursorOverWindowContent(Rectangle bounds)
-    {
-        var focusX = bounds.Left + (bounds.Width / 2);
-        var focusY = bounds.Top + (bounds.Height * FocusPointVerticalPercent / 100);
-        SetCursorPos(focusX, focusY);
-        var clipRect = new NativeRect
-        {
-            Left = focusX,
-            Top = focusY,
-            Right = focusX + 1,
-            Bottom = focusY + 1,
-        };
-        ClipCursor(ref clipRect);
         SleepWithCancellation((int)FocusDelay.TotalMilliseconds);
     }
 
@@ -590,7 +808,7 @@ public sealed class ScreenCaptureService
         return GetCursorPos(out var point) ? point : new NativePoint();
     }
 
-    private static void ReleasePinnedCursor(NativePoint originalCursor)
+    private static void RestoreCursor(NativePoint originalCursor)
     {
         ClipCursor(IntPtr.Zero);
         SetCursorPos(originalCursor.X, originalCursor.Y);
@@ -604,8 +822,8 @@ public sealed class ScreenCaptureService
         for (var attempt = 0; attempt < MaximumScrollToTopAttempts; attempt++)
         {
             ThrowIfEscapePressed();
-            using var before = CaptureScreenRectangle(windowBounds);
-            ScrollByWheel(WheelScrollToTopNotches);
+            using var before = CaptureScreenRectangleAtScrollBarEdge(windowBounds);
+            ScrollByWheel(windowBounds, WheelScrollToTopNotches);
             using var after = CaptureScreenRectangleAfterScroll(windowBounds);
             if (BitmapsEqual(before, after))
             {
@@ -617,11 +835,11 @@ public sealed class ScreenCaptureService
     private static Bitmap CaptureScreenRectangleAfterScroll(Rectangle bounds)
     {
         SleepWithCancellation(ScrollSettleInitialMs);
-        Bitmap prev = CaptureScreenRectangle(bounds);
+        Bitmap prev = CaptureScreenRectangleAtScrollBarEdge(bounds);
         for (var i = 0; i < ScrollSettleMaxPolls; i++)
         {
             SleepWithCancellation(ScrollSettlePollMs);
-            Bitmap current = CaptureScreenRectangle(bounds);
+            Bitmap current = CaptureScreenRectangleAtScrollBarEdge(bounds);
             if (BitmapsEqual(prev, current))
             {
                 prev.Dispose();
@@ -635,16 +853,16 @@ public sealed class ScreenCaptureService
         return prev;
     }
 
-    private static void ScrollDownOnePage()
+    private static Bitmap CaptureScreenRectangleAtScrollBarEdge(Rectangle bounds)
     {
-        ScrollByWheel(-WheelScrollDownNotches);
+        PositionCursorOnScrollBarEdge(bounds);
+        return CaptureScreenRectangle(bounds);
     }
 
     private static Bitmap CaptureNextScrolledFrame(IntPtr windowHandle, Rectangle bounds, Bitmap previousFrame)
     {
         ThrowIfEscapePressed();
         RestoreAndActivateWindow(windowHandle);
-        PositionCursorOverWindowContent(bounds);
         SendKey(VirtualKeyPageDown);
         var nextFrame = CaptureScreenRectangleAfterScroll(bounds);
         if (ScrollPositionChanged(previousFrame, nextFrame))
@@ -654,16 +872,17 @@ public sealed class ScreenCaptureService
 
         nextFrame.Dispose();
         RestoreAndActivateWindow(windowHandle);
-        PositionCursorOverWindowContent(bounds);
-        ScrollDownOnePage();
+        ScrollByWheel(bounds, -WheelScrollDownNotches);
         return CaptureScreenRectangleAfterScroll(bounds);
     }
 
-    private static void ScrollByWheel(int notchCount)
+    private static void ScrollByWheel(Rectangle bounds, int notchCount)
     {
         ThrowIfEscapePressed();
+        PositionCursorOnScrollBarEdge(bounds);
         var delta = unchecked((uint)(notchCount * WheelDelta));
         mouse_event(MouseEventWheel, 0, 0, delta, UIntPtr.Zero);
+        PositionCursorOnScrollBarEdge(bounds);
     }
 
     private static void SendModifiedKey(byte modifierKey, byte key)

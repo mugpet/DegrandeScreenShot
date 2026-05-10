@@ -1,0 +1,148 @@
+<Window x:Class="DegrandeScreenShot.App.CaptureTypeSelectorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Capture Type"
+        SizeToContent="WidthAndHeight"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        ShowActivated="True"
+        Topmost="True"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual">
+    <Window.Resources>
+        <SolidColorBrush x:Key="IslandBackgroundBrush" Color="#D91A1E25" />
+        <SolidColorBrush x:Key="IslandBorderBrush" Color="#28FFFFFF" />
+        <SolidColorBrush x:Key="IslandButtonBrush" Color="#12FFFFFF" />
+        <SolidColorBrush x:Key="IslandButtonHoverBrush" Color="#1CFFFFFF" />
+        <SolidColorBrush x:Key="IslandButtonPressedBrush" Color="#26FFFFFF" />
+        <SolidColorBrush x:Key="IslandButtonActiveBrush" Color="#FF1AA9D8" />
+        <SolidColorBrush x:Key="IslandButtonActiveBorderBrush" Color="#7DCCF3FF" />
+        <SolidColorBrush x:Key="IslandTextBrush" Color="#FFF4F7FB" />
+        <SolidColorBrush x:Key="IslandMutedTextBrush" Color="#A9C2CEDA" />
+        <SolidColorBrush x:Key="IslandDividerBrush" Color="#1FFFFFFF" />
+
+        <Style x:Key="CaptureTypeButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="92" />
+            <Setter Property="Height" Value="72" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource IslandTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource IslandButtonBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="ToolTipService.InitialShowDelay" Value="200" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource IslandButtonHoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource IslandButtonPressedBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="CaptureTypePrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource CaptureTypeButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource IslandButtonActiveBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource IslandButtonActiveBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+
+        <Style x:Key="CaptureTypeTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource IslandTextBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="CaptureTypeIconStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="Foreground" Value="{DynamicResource IslandTextBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,0,5" />
+        </Style>
+
+        <Style x:Key="CaptureTypeHintStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource IslandMutedTextBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="Transparent" Margin="14">
+        <Border Padding="12,10"
+                Background="{DynamicResource IslandBackgroundBrush}"
+                BorderBrush="{DynamicResource IslandBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="26">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="34" ShadowDepth="12" Color="#CC000000" Opacity="0.42" />
+            </Border.Effect>
+
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Margin="2,0,16,0" VerticalAlignment="Center">
+                    <TextBlock FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" Text="Capture" />
+                    <TextBlock Margin="0,2,0,0" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Select type" />
+                </StackPanel>
+
+                <Border Width="1" Height="42" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
+
+                <Button Click="ActionButton_Click" Tag="ChooseAction" Style="{StaticResource CaptureTypePrimaryButtonStyle}" ToolTip="Region, then decide">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8B7;" />
+                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Decide" />
+                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+5" />
+                    </StackPanel>
+                </Button>
+
+                <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="CopyRegion" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Region straight to clipboard">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8C8;" />
+                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Copy" />
+                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+6" />
+                    </StackPanel>
+                </Button>
+
+                <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="OpenEditor" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Region straight to editor">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE70F;" />
+                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Edit" />
+                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+7" />
+                    </StackPanel>
+                </Button>
+
+                <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="ClipboardEditor" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Open clipboard in editor">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE77F;" />
+                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Clipboard" />
+                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+8" />
+                    </StackPanel>
+                </Button>
+
+                <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="ScrollingWindow" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Scrolling window to editor">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8CB;" />
+                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Scroll" />
+                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+9" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

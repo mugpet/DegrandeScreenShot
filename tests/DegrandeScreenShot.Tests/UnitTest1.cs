@@ -141,6 +141,7 @@ public class ScrollCaptureStitcherTests
         Assert.Equal(4, match.OverlapRows);
         Assert.Equal(2, match.IncomingOffsetRows);
         Assert.Equal(6, match.AppendStartRow);
+        Assert.Equal(1.0, match.MatchRatio);
     }
 
     [Fact]
@@ -192,5 +193,22 @@ public class ScrollCaptureStitcherTests
         var overlap = ScrollCaptureStitcher.FindVerticalOverlap(existingRows, incomingRows, minOverlapRows: 61);
 
         Assert.Equal(1001, overlap);
+    }
+
+    [Fact]
+    public void FindsOverlapForListScrollsThatKeepAboutOneThirdOfTheViewport()
+    {
+        var existingRows = Enumerable.Range(0, 900).Select(index => (ulong)(30000 + index)).ToArray();
+        var incomingRows = new ulong[900];
+
+        Array.Copy(existingRows, 594, incomingRows, 0, 306);
+        for (var index = 306; index < incomingRows.Length; index++)
+        {
+            incomingRows[index] = (ulong)(60000 + index);
+        }
+
+        var overlap = ScrollCaptureStitcher.FindVerticalOverlap(existingRows, incomingRows, minOverlapRows: 45);
+
+        Assert.Equal(306, overlap);
     }
 }

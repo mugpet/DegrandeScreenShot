@@ -18,13 +18,13 @@ public static class ScrollCaptureStitcher
         var maxOffset = Math.Min(maxIncomingOffsetRows, Math.Max(0, incomingRows.Count - minOverlapRows));
         for (var incomingOffset = 0; incomingOffset <= maxOffset; incomingOffset++)
         {
-            var overlap = FindVerticalOverlap(existingRows, incomingRows, incomingOffset, minOverlapRows);
-            if (overlap <= bestMatch.OverlapRows)
+            var match = FindVerticalOverlapMatch(existingRows, incomingRows, incomingOffset, minOverlapRows);
+            if (match.OverlapRows <= bestMatch.OverlapRows)
             {
                 continue;
             }
 
-            bestMatch = new VerticalOverlapMatch(overlap, incomingOffset);
+            bestMatch = match;
         }
 
         return bestMatch;
@@ -62,10 +62,10 @@ public static class ScrollCaptureStitcher
 
     public static int FindVerticalOverlap(IReadOnlyList<ulong> existingRows, IReadOnlyList<ulong> incomingRows, int minOverlapRows)
     {
-        return FindVerticalOverlap(existingRows, incomingRows, 0, minOverlapRows);
+        return FindVerticalOverlapMatch(existingRows, incomingRows, 0, minOverlapRows).OverlapRows;
     }
 
-    private static int FindVerticalOverlap(IReadOnlyList<ulong> existingRows, IReadOnlyList<ulong> incomingRows, int incomingOffsetRows, int minOverlapRows)
+    private static VerticalOverlapMatch FindVerticalOverlapMatch(IReadOnlyList<ulong> existingRows, IReadOnlyList<ulong> incomingRows, int incomingOffsetRows, int minOverlapRows)
     {
         var availableIncomingRows = incomingRows.Count - incomingOffsetRows;
         var maxOverlap = Math.Min(existingRows.Count, availableIncomingRows);
@@ -89,17 +89,22 @@ public static class ScrollCaptureStitcher
             };
             if (matches >= Math.Ceiling(overlap * requiredMatchRatio))
             {
-                return overlap;
+                return new VerticalOverlapMatch(overlap, incomingOffsetRows, (double)matches / overlap);
             }
         }
 
-        return 0;
+        return VerticalOverlapMatch.None;
     }
 }
 
-public readonly record struct VerticalOverlapMatch(int OverlapRows, int IncomingOffsetRows)
+public readonly record struct VerticalOverlapMatch(int OverlapRows, int IncomingOffsetRows, double MatchRatio)
 {
-    public static VerticalOverlapMatch None => new(0, 0);
+    public VerticalOverlapMatch(int overlapRows, int incomingOffsetRows)
+        : this(overlapRows, incomingOffsetRows, 0)
+    {
+    }
+
+    public static VerticalOverlapMatch None => new(0, 0, 0);
 
     public int AppendStartRow => IncomingOffsetRows + OverlapRows;
 }

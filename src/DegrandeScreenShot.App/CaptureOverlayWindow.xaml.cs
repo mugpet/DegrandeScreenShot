@@ -60,6 +60,8 @@ public partial class CaptureOverlayWindow : Window
 
     public WindowSelection? SelectedWindow { get; private set; }
 
+    public CaptureTargetSelection? SelectedScrollTarget { get; private set; }
+
     private void CaptureOverlayWindow_Loaded(object sender, RoutedEventArgs e)
     {
         Left = _captureFrame.VirtualLeft;
@@ -104,7 +106,7 @@ public partial class CaptureOverlayWindow : Window
         }
 
         var point = ToPixelPoint(e.GetPosition(OverlayCanvas));
-        if (_selectionMode == CaptureSelectionMode.WindowOrRegion)
+        if (_selectionMode is CaptureSelectionMode.WindowOrRegion or CaptureSelectionMode.ScrollTarget)
         {
             UpdateWindowSelection(point);
             _pressedTarget = _hoveredTarget;
@@ -135,7 +137,7 @@ public partial class CaptureOverlayWindow : Window
 
         if (_selectionSession.Interaction == SelectionInteraction.None)
         {
-            if (_selectionMode == CaptureSelectionMode.WindowOrRegion)
+            if (_selectionMode is CaptureSelectionMode.WindowOrRegion or CaptureSelectionMode.ScrollTarget)
             {
                 UpdateWindowSelection(pointer);
             }
@@ -177,6 +179,12 @@ public partial class CaptureOverlayWindow : Window
 
         ReleaseMouseCapture();
         _selectionSession.Complete();
+
+        if (_selectionMode == CaptureSelectionMode.ScrollTarget)
+        {
+            SelectScrollTarget(e);
+            return;
+        }
 
         if (_selectionMode == CaptureSelectionMode.WindowOrRegion && IsHybridClickSelection())
         {
@@ -260,6 +268,7 @@ public partial class CaptureOverlayWindow : Window
         _capturedSelection = null;
         _capturedSelectionBounds = null;
         SelectedWindow = null;
+        SelectedScrollTarget = null;
         _hoveredTarget = null;
         _pressedTarget = null;
         Close();
@@ -351,6 +360,58 @@ public partial class CaptureOverlayWindow : Window
         PositionActionPanel();
     }
 
+    private void SelectScrollTarget(MouseButtonEventArgs e)
+    {
+        CaptureTargetSelection? targetSelection;
+        if (IsHybridClickSelection())
+        {
+            var point = ToPixelPoint(e.GetPosition(OverlayCanvas));
+            targetSelection = _pressedTarget ?? GetTargetSelectionAt(point);
+            _selectionSession.Clear();
+        }
+        else
+        {
+            targetSelection = CreateScrollTargetFromSelection(_selectionSession.Selection);
+        }
+
+        _pressedTarget = null;
+        if (targetSelection is null)
+        {
+            _selectionSession.Clear();
+            UpdateShadeRects(null);
+            return;
+        }
+
+        SelectedScrollTarget = targetSelection;
+        DialogResult = true;
+        Close();
+    }
+
+    private CaptureTargetSelection? CreateScrollTargetFromSelection(PixelRect? selection)
+    {
+        if (selection is not { HasArea: true } selectedBounds)
+        {
+            return null;
+        }
+
+        var centerPoint = new PixelPoint(
+            selectedBounds.Left + (selectedBounds.Width / 2),
+            selectedBounds.Top + (selectedBounds.Height / 2));
+        var windowSelection = GetWindowSelectionAt(centerPoint) ?? _pressedTarget?.Window;
+        if (windowSelection is null)
+        {
+            return null;
+        }
+
+        var clippedBounds = ClipToWindow(selectedBounds, windowSelection.Bounds);
+        if (clippedBounds is not { HasArea: true })
+        {
+            return null;
+        }
+
+        return new CaptureTargetSelection(windowSelection, clippedBounds.Value, clippedBounds.Value);
+    }
+
     private BitmapSource Crop(PixelRect selection)
     {
         var croppedBitmap = new CroppedBitmap(
@@ -402,11 +463,18 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
+        if (_selectionMode == CaptureSelectionMode.ScrollTarget)
+        {
+            HintTitleText.Text = "Select scroll area";
+            HintDescriptionText.Text = "Click a window or element, or drag around the scrollable content area to stitch only that area. Esc cancels.";
+            return;
+        }
+
         HintTitleText.Text = "Select a region";
         HintDescriptionText.Text = "Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel.";
     }
 
-    private bool UsesWindowPicking => _selectionMode is CaptureSelectionMode.Window or CaptureSelectionMode.WindowOrRegion;
+    private bool UsesWindowPicking => _selectionMode is CaptureSelectionMode.Window or CaptureSelectionMode.WindowOrRegion or CaptureSelectionMode.ScrollTarget;
 
     private void UpdateWindowSelection(PixelPoint overlayPoint)
     {
@@ -765,6 +833,7 @@ public enum CaptureSelectionMode
     Region,
     WindowOrRegion,
     Window,
+    ScrollTarget,
 }
 
 public sealed record WindowSelection(IntPtr Handle, PixelRect Bounds);
