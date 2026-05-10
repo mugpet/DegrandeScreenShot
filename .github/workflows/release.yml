@@ -87,7 +87,7 @@ jobs:
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: f929bb63-ecfe-41f4-ab4a-ab44038c10d1
+          organization-id: f929bb63-e6fe-41f4-ab4a-ab44038c10d1
           project-slug: degrande-screenshot
           signing-policy-slug: release-signing
           github-artifact-id: ${{ steps.upload-unsigned-app.outputs.artifact-id }}
@@ -124,7 +124,7 @@ jobs:
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: f929bb63-ecfe-41f4-ab4a-ab44038c10d1
+          organization-id: f929bb63-e6fe-41f4-ab4a-ab44038c10d1
           project-slug: degrande-screenshot
           signing-policy-slug: release-signing
           github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
