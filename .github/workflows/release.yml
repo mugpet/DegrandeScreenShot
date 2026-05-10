@@ -83,6 +83,52 @@ jobs:
           path: ${{ env.PUBLISH_DIR }}/DegrandeScreenShot.App.exe
           if-no-files-found: error
 
+      - name: Validate SignPath token
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          $organizationId = "f929bb63-e6fe-41f4-ab4a-ab44038c10d1"
+          $projectSlug = "degrande-screenshot"
+          $signingPolicySlug = "release-signing"
+          $token = $env:SIGNPATH_API_TOKEN
+
+          if ([string]::IsNullOrWhiteSpace($token)) {
+            throw "SIGNPATH_API_TOKEN is empty or missing."
+          }
+
+          $trimmedToken = $token.Trim()
+          if ($trimmedToken.Length -ne $token.Length) {
+            Write-Host "SIGNPATH_API_TOKEN has leading or trailing whitespace. Raw length: $($token.Length), trimmed length: $($trimmedToken.Length)."
+          }
+
+          $hashBytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($trimmedToken))
+          $hash = [Convert]::ToHexString($hashBytes).ToLowerInvariant()
+          Write-Host "SIGNPATH_API_TOKEN trimmed length: $($trimmedToken.Length)"
+          Write-Host "SIGNPATH_API_TOKEN sha256: $hash"
+
+          $headers = @{ Authorization = "Bearer $trimmedToken" }
+          $uri = "https://app.signpath.io/api/v1/$organizationId/Cryptoki/MySigningPolicies?projectSlug=$projectSlug&signingPolicySlug=$signingPolicySlug"
+          try {
+            $result = Invoke-RestMethod -Headers $headers -Uri $uri -Method Get
+            Write-Host "SignPath token can access $projectSlug/$signingPolicySlug."
+          }
+          catch {
+            if ($_.Exception.Response) {
+              $statusCode = [int]$_.Exception.Response.StatusCode
+              $statusDescription = $_.Exception.Response.StatusDescription
+              $stream = $_.Exception.Response.GetResponseStream()
+              $body = ""
+              if ($stream) {
+                $reader = New-Object System.IO.StreamReader($stream)
+                $body = $reader.ReadToEnd()
+              }
+              throw "SignPath token validation failed: HTTP $statusCode $statusDescription $body"
+            }
+
+            throw
+          }
+
       - name: Sign app via SignPath
         uses: signpath/github-action-submit-signing-request@v2
         with:
