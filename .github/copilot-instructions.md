@@ -4,6 +4,7 @@
 - Always restart the latest built app so the user is testing the newest build, not a stale running instance.
 - Prefer a `Release` build for user-facing verification unless a task explicitly requires `Debug`.
 - Do not tell the user to test without restarting the app first; restart it yourself.
+- For ongoing SignPath OSS GitHub Actions signing work, consult `docs/signpath-oss-github-actions.md` and the `signpath-oss-github-actions` repo skill before changing `.github/workflows/release.yml` or re-diagnosing SignPath setup.
 - Verified restart flow for this repo:
 
 ```powershell
