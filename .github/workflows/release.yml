@@ -109,7 +109,7 @@ jobs:
           finally {
             $sha256.Dispose()
           }
-          $hash = [Convert]::ToHexString($hashBytes).ToLowerInvariant()
+          $hash = ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
           Write-Host "SIGNPATH_API_TOKEN trimmed length: $($trimmedToken.Length)"
           Write-Host "SIGNPATH_API_TOKEN sha256: $hash"
 
