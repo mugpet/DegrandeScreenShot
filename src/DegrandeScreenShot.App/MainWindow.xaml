@@ -176,7 +176,7 @@
                         CornerRadius="18">
                     <StackPanel>
                         <TextBlock FontWeight="SemiBold" Text="Default controls" />
-                        <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel." TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel. Use Ctrl + Shift + Alt + 9 to pick a window and stitch a full scrolling capture into the editor." TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 
@@ -231,6 +231,38 @@
                                 <StackPanel Grid.Column="1" Margin="14,0,0,0">
                                     <TextBlock FontWeight="SemiBold" Text="Region straight to editor" />
                                     <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Freeze the desktop, draw a region, and open the result in the annotation editor immediately." TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Margin="0,0,0,12" Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutBrush}" CornerRadius="12">
+                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutTextBrush}" Text="Ctrl + Shift + Alt + 8" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                                    <TextBlock FontWeight="SemiBold" Text="Clipboard straight to editor" />
+                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Open the current clipboard image or a clipboard summary card directly in the editor." TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutWarmBrush}" CornerRadius="12">
+                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutWarmTextBrush}" Text="Ctrl + Shift + Alt + 9" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                                    <TextBlock FontWeight="SemiBold" Text="Scrolling window to editor" />
+                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Pick a window, jump to the top, scroll it down, and stitch the captured content into one tall image in the editor." TextWrapping="Wrap" />
                                 </StackPanel>
                             </Grid>
                         </Border>

@@ -9,9 +9,9 @@ public partial class App : System.Windows.Application
 	{
 		base.OnStartup(e);
 
-		var mainWindow = new MainWindow(startHiddenInTray: true);
+		var mainWindow = new MainWindow();
 		MainWindow = mainWindow;
-		mainWindow.Show();
+		mainWindow.InitializeHiddenTrayMode();
 	}
 }
 

@@ -64,6 +64,8 @@ internal sealed record EditorPreferences(
     double? ArrowBodyScale,
     double? ArrowFrontScale,
     double? ArrowHeadScale,
+    double? ArrowTailRoundness,
+    double? ArrowHeadRoundness,
     double? ArrowShadowStrength,
     double? ArrowBorderWidth,
     bool? ArrowHasStartHead,
@@ -91,6 +93,8 @@ internal sealed record EditorPreferences(
         ArrowBodyScale: 0.20,
         ArrowFrontScale: 0.30,
         ArrowHeadScale: 0.40,
+        ArrowTailRoundness: 0.45,
+        ArrowHeadRoundness: 0.00,
         ArrowShadowStrength: 0.00,
         ArrowBorderWidth: 0.00,
         ArrowHasStartHead: false,
@@ -119,6 +123,8 @@ internal sealed record ArrowShapePresetPreference(
     bool? HasStartHead,
     bool? HasEndHead,
     double? TailHeadScale,
+    double? TailRoundness,
+    double? HeadRoundness,
     List<ArrowPresetPointPreference>? BendPoints);
 
 internal sealed record ArrowPresetPointPreference(double U, double V);

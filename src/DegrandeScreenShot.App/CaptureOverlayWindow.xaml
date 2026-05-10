@@ -43,8 +43,8 @@
                     CornerRadius="18"
                     IsHitTestVisible="False">
                 <StackPanel>
-                    <TextBlock Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Select a region" />
-                    <TextBlock Margin="0,8,0,0" Foreground="#FFD4E5ED" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel." TextWrapping="Wrap" />
+                    <TextBlock x:Name="HintTitleText" Foreground="White" FontSize="16" FontWeight="SemiBold" Text="Select a region" />
+                    <TextBlock x:Name="HintDescriptionText" Margin="0,8,0,0" Foreground="#FFD4E5ED" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 

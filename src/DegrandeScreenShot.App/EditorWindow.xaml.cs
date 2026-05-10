@@ -49,6 +49,8 @@ public partial class EditorWindow : Window
     internal const double DefaultArrowFrontScale = 0.30;
     internal const double DefaultArrowHeadScale = 0.40;
     internal const double DefaultArrowTailHeadScale = 1.00;
+    internal const double DefaultArrowTailRoundness = 0.45;
+    internal const double DefaultArrowHeadRoundness = 0.00;
     internal const double DefaultArrowShadowStrength = 0.00;
     internal const double DefaultArrowBorderWidth = 2.00;
     private const string WindowsThemeRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
@@ -112,6 +114,8 @@ public partial class EditorWindow : Window
     private double _lastArrowFrontScale = DefaultArrowFrontScale;
     private double _lastArrowHeadScale = DefaultArrowHeadScale;
     private double _lastArrowTailHeadScale = DefaultArrowTailHeadScale;
+    private double _lastArrowTailRoundness = DefaultArrowTailRoundness;
+    private double _lastArrowHeadRoundness = DefaultArrowHeadRoundness;
     private double _lastArrowShadowStrength = DefaultArrowShadowStrength;
     private double _lastArrowBorderWidth = DefaultArrowBorderWidth;
     private bool _lastArrowHasStartHead;
@@ -144,6 +148,7 @@ public partial class EditorWindow : Window
         Loaded += EditorWindow_Loaded;
         SourceInitialized += EditorWindow_SourceInitialized;
         Closed += EditorWindow_Closed;
+        PreviewMouseDown += EditorWindow_PreviewMouseDown;
         SystemEvents.UserPreferenceChanged += SystemEvents_UserPreferenceChanged;
         Title = $"Edit Capture {_nextEditorNumber++}";
         ApplyWorkingImage(_workingImage);
@@ -195,6 +200,31 @@ public partial class EditorWindow : Window
     private void EditorWindow_SourceInitialized(object? sender, EventArgs e)
     {
         ApplyNativeTitleBarTheme();
+    }
+
+    private void EditorWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!IsActive)
+        {
+            BringEditorWindowToFront();
+        }
+    }
+
+    private void BringEditorWindowToFront()
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            _ = SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SetWindowPosNoMove | SetWindowPosNoSize | SetWindowPosShowWindow);
+            _ = SetForegroundWindow(handle);
+        }
+
+        Activate();
     }
 
     private void EditorWindow_Closed(object? sender, EventArgs e)
@@ -358,6 +388,17 @@ public partial class EditorWindow : Window
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref uint attributeValue, int attributeSize);
+
+    private static readonly IntPtr HwndTop = new(0);
+    private const uint SetWindowPosNoSize = 0x0001;
+    private const uint SetWindowPosNoMove = 0x0002;
+    private const uint SetWindowPosShowWindow = 0x0040;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     private void ToolButton_Checked(object sender, RoutedEventArgs e)
     {
@@ -1242,6 +1283,8 @@ public partial class EditorWindow : Window
                 arrow.SetFrontScale(DefaultArrowFrontScale);
                 arrow.SetHeadScale(DefaultArrowHeadScale);
                 arrow.SetTailHeadScale(DefaultArrowTailHeadScale);
+                arrow.SetTailRoundness(DefaultArrowTailRoundness);
+                arrow.SetHeadRoundness(DefaultArrowHeadRoundness);
                 arrow.SetShadowStrength(DefaultArrowShadowStrength);
                 arrow.SetBorderWidth(DefaultArrowBorderWidth);
                 arrow.SetStartHeadEnabled(false);
@@ -1254,6 +1297,8 @@ public partial class EditorWindow : Window
                 _lastArrowFrontScale = DefaultArrowFrontScale;
                 _lastArrowHeadScale = DefaultArrowHeadScale;
                 _lastArrowTailHeadScale = DefaultArrowTailHeadScale;
+                _lastArrowTailRoundness = DefaultArrowTailRoundness;
+                _lastArrowHeadRoundness = DefaultArrowHeadRoundness;
                 _lastArrowShadowStrength = DefaultArrowShadowStrength;
                 _lastArrowBorderWidth = DefaultArrowBorderWidth;
                 _lastArrowHasStartHead = false;
@@ -1634,6 +1679,8 @@ public partial class EditorWindow : Window
         var frontScale = arrowAnnotation?.FrontScale ?? _lastArrowFrontScale;
         var headScale = arrowAnnotation?.HeadScale ?? _lastArrowHeadScale;
         var tailHeadScale = arrowAnnotation?.TailHeadScale ?? _lastArrowTailHeadScale;
+        var tailRoundness = arrowAnnotation?.TailRoundness ?? _lastArrowTailRoundness;
+        var headRoundness = arrowAnnotation?.HeadRoundness ?? _lastArrowHeadRoundness;
         var shadowStrength = arrowAnnotation?.ShadowStrength ?? _lastArrowShadowStrength;
         var borderWidth = arrowAnnotation?.BorderWidth ?? _lastArrowBorderWidth;
         var hasEndHead = arrowAnnotation?.HasEndHead ?? _lastArrowHasEndHead;
@@ -1647,6 +1694,8 @@ public partial class EditorWindow : Window
             ArrowFrontSlider.Value = frontScale;
             ArrowHeadSlider.Value = headScale;
             ArrowTailHeadSlider.Value = tailHeadScale;
+            ArrowTailRoundnessSlider.Value = tailRoundness * 100;
+            ArrowHeadRoundnessSlider.Value = headRoundness * 100;
             ArrowShadowSlider.Value = shadowStrength * 100;
             ArrowBorderSlider.Value = borderWidth;
             ArrowHeadToggleButton.IsChecked = hasEndHead;
@@ -1661,6 +1710,8 @@ public partial class EditorWindow : Window
         ArrowFrontValueLabel.Text = frontScale.ToString("0.00", CultureInfo.InvariantCulture);
         ArrowHeadValueLabel.Text = headScale.ToString("0.00", CultureInfo.InvariantCulture);
         ArrowTailHeadValueLabel.Text = tailHeadScale.ToString("0.00", CultureInfo.InvariantCulture);
+        ArrowTailRoundnessValueLabel.Text = $"{Math.Round(tailRoundness * 100):0}%";
+        ArrowHeadRoundnessValueLabel.Text = $"{Math.Round(headRoundness * 100):0}%";
         ArrowShadowValueLabel.Text = $"{Math.Round(shadowStrength * 100):0}%";
         ArrowBorderValueLabel.Text = borderWidth.ToString("0.0", CultureInfo.InvariantCulture);
         UpdateArrowPresetButtonLabel();
@@ -1742,6 +1793,36 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetTailHeadScale(e.NewValue);
+            RefreshCanvas();
+        }
+    }
+
+    private void ArrowTailRoundnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ArrowTailRoundnessValueLabel is null) return;
+        ArrowTailRoundnessValueLabel.Text = $"{Math.Round(e.NewValue):0}%";
+        if (_suppressArrowSliderEvents) return;
+        _lastArrowTailRoundness = Math.Clamp(e.NewValue / 100d, 0, 1);
+        ClearSelectedArrowPreset();
+        UpdateArrowPresetButtonLabel();
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetTailRoundness(_lastArrowTailRoundness);
+            RefreshCanvas();
+        }
+    }
+
+    private void ArrowHeadRoundnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ArrowHeadRoundnessValueLabel is null) return;
+        ArrowHeadRoundnessValueLabel.Text = $"{Math.Round(e.NewValue):0}%";
+        if (_suppressArrowSliderEvents) return;
+        _lastArrowHeadRoundness = Math.Clamp(e.NewValue / 100d, 0, 1);
+        ClearSelectedArrowPreset();
+        UpdateArrowPresetButtonLabel();
+        if (_selectedAnnotation is ArrowAnnotation arrow)
+        {
+            arrow.SetHeadRoundness(_lastArrowHeadRoundness);
             RefreshCanvas();
         }
     }
@@ -2115,6 +2196,8 @@ public partial class EditorWindow : Window
                 HasStartHead: arrow.HasStartHead,
                 HasEndHead: arrow.HasEndHead,
                 TailHeadScale: arrow.TailHeadScale,
+                TailRoundness: arrow.TailRoundness,
+                HeadRoundness: arrow.HeadRoundness,
                 BendPoints: CreateRelativeArrowPresetPoints(arrow));
         }
 
@@ -2129,6 +2212,8 @@ public partial class EditorWindow : Window
             HasStartHead: _lastArrowHasStartHead,
             HasEndHead: _lastArrowHasEndHead,
             TailHeadScale: _lastArrowTailHeadScale,
+                TailRoundness: _lastArrowTailRoundness,
+                HeadRoundness: _lastArrowHeadRoundness,
             BendPoints: _lastArrowRelativeBendPoints.Select(point => new ArrowPresetPointPreference(point.U, point.V)).ToList());
     }
 
@@ -2140,6 +2225,8 @@ public partial class EditorWindow : Window
         _lastArrowFrontScale = Math.Clamp(preset.FrontScale, 0.15, 3.0);
         _lastArrowHeadScale = Math.Clamp(preset.HeadScale, 0.2, 1.6);
         _lastArrowTailHeadScale = Math.Clamp(preset.TailHeadScale ?? 1.0, 0.2, 1.6);
+        _lastArrowTailRoundness = Math.Clamp(preset.TailRoundness ?? DefaultArrowTailRoundness, 0, 1);
+        _lastArrowHeadRoundness = Math.Clamp(preset.HeadRoundness ?? DefaultArrowHeadRoundness, 0, 1);
         _lastArrowShadowStrength = Math.Clamp(preset.ShadowStrength, 0, 1);
         _lastArrowBorderWidth = Math.Clamp(preset.BorderWidth, 0, 12);
         _lastArrowHasStartHead = preset.HasStartHead == true;
@@ -2176,6 +2263,8 @@ public partial class EditorWindow : Window
         arrow.SetFrontScale(preset.FrontScale);
         arrow.SetHeadScale(preset.HeadScale);
         arrow.SetTailHeadScale(preset.TailHeadScale ?? 1.0);
+        arrow.SetTailRoundness(preset.TailRoundness ?? DefaultArrowTailRoundness);
+        arrow.SetHeadRoundness(preset.HeadRoundness ?? DefaultArrowHeadRoundness);
         arrow.SetShadowStrength(preset.ShadowStrength);
         arrow.SetBorderWidth(preset.BorderWidth);
         arrow.SetStartHeadEnabled(preset.HasStartHead == true);
@@ -2438,6 +2527,8 @@ public partial class EditorWindow : Window
         arrowAnnotation.SetFrontScale(_lastArrowFrontScale);
         arrowAnnotation.SetHeadScale(_lastArrowHeadScale);
         arrowAnnotation.SetTailHeadScale(_lastArrowTailHeadScale);
+        arrowAnnotation.SetTailRoundness(_lastArrowTailRoundness);
+        arrowAnnotation.SetHeadRoundness(_lastArrowHeadRoundness);
         arrowAnnotation.SetShadowStrength(_lastArrowShadowStrength);
         arrowAnnotation.SetBorderWidth(_lastArrowBorderWidth);
         arrowAnnotation.SetStartHeadEnabled(_lastArrowHasStartHead);
@@ -2484,6 +2575,8 @@ public partial class EditorWindow : Window
         _lastArrowFrontScale = arrow.FrontScale;
         _lastArrowHeadScale = arrow.HeadScale;
         _lastArrowTailHeadScale = arrow.TailHeadScale;
+        _lastArrowTailRoundness = arrow.TailRoundness;
+        _lastArrowHeadRoundness = arrow.HeadRoundness;
         _lastArrowShadowStrength = arrow.ShadowStrength;
         _lastArrowBorderWidth = arrow.BorderWidth;
         _lastArrowHasStartHead = arrow.HasStartHead;
@@ -3480,7 +3573,7 @@ public partial class EditorWindow : Window
             EllipseAnnotation ellipse => $"ellipse:{RectToSignature(ellipse.Bounds)}:{ColorToSignature(ellipse.StrokeColor)}:{FormatDouble(ellipse.ShadowStrength)}:{FormatDouble(ellipse.BorderWidth)}",
             TextAnnotation text => $"text:{PointToSignature(text.Location)}:{FormatDouble(text.BoxWidth)}:{FormatDouble(text.FontSize)}:{FormatDouble(text.BackgroundOpacity)}:{FormatDouble(text.BackgroundColorStrength)}:{FormatDouble(text.ShadowStrength)}:{FormatDouble(text.BorderWidth)}:{ColorToSignature(text.TextColor)}:{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text.Text ?? string.Empty))}:{text.TextAlignment}:{text.IsBold}",
             ObscureAnnotation obscure => $"obscure:{RectToSignature(obscure.Bounds)}:{FormatDouble(obscure.BlurLevel)}:{FormatDouble(obscure.PixelationLevel)}:{FormatDouble(obscure.ColorStrength)}:{FormatDouble(obscure.ShadowStrength)}:{FormatDouble(obscure.BorderWidth)}:{ColorToSignature(obscure.OverlayColor)}",
-            ArrowAnnotation arrow => $"arrow:{PointToSignature(arrow.Start)}:{PointToSignature(arrow.End)}:{string.Join(",", arrow.BendPoints.Select(PointToSignature))}:{FormatDouble(arrow.ShaftThickness)}:{FormatDouble(arrow.HeadLength)}:{FormatDouble(arrow.HeadWidth)}:{FormatDouble(arrow.OuterEdgeWidth)}:{FormatDouble(arrow.InnerEdgeWidth)}:{FormatDouble(arrow.TailSweep)}:{FormatDouble(arrow.HeadSkew)}:{FormatDouble(arrow.TailScale)}:{FormatDouble(arrow.BodyScale)}:{FormatDouble(arrow.FrontScale)}:{FormatDouble(arrow.HeadScale)}:{FormatDouble(arrow.TailHeadScale)}:{FormatDouble(arrow.ShadowStrength)}:{FormatDouble(arrow.BorderWidth)}:{arrow.HasStartHead}:{arrow.HasEndHead}:{ColorToSignature(arrow.StrokeColor)}:{arrow.Style}",
+            ArrowAnnotation arrow => $"arrow:{PointToSignature(arrow.Start)}:{PointToSignature(arrow.End)}:{string.Join(",", arrow.BendPoints.Select(PointToSignature))}:{FormatDouble(arrow.ShaftThickness)}:{FormatDouble(arrow.HeadLength)}:{FormatDouble(arrow.HeadWidth)}:{FormatDouble(arrow.OuterEdgeWidth)}:{FormatDouble(arrow.InnerEdgeWidth)}:{FormatDouble(arrow.TailSweep)}:{FormatDouble(arrow.HeadSkew)}:{FormatDouble(arrow.TailScale)}:{FormatDouble(arrow.BodyScale)}:{FormatDouble(arrow.FrontScale)}:{FormatDouble(arrow.HeadScale)}:{FormatDouble(arrow.TailHeadScale)}:{FormatDouble(arrow.TailRoundness)}:{FormatDouble(arrow.HeadRoundness)}:{FormatDouble(arrow.ShadowStrength)}:{FormatDouble(arrow.BorderWidth)}:{arrow.HasStartHead}:{arrow.HasEndHead}:{ColorToSignature(arrow.StrokeColor)}:{arrow.Style}",
             HighlightAnnotation highlight => $"highlight:{highlight.Mode}:{RectToSignature(highlight.Bounds)}:{string.Join(",", highlight.Points.Select(PointToSignature))}:{ColorToSignature(highlight.HighlightColor)}:{FormatDouble(highlight.ColorStrength)}:{FormatDouble(highlight.ShadowStrength)}:{FormatDouble(highlight.BorderWidth)}",
             _ => annotation.GetType().FullName ?? annotation.GetType().Name,
         };
@@ -3538,6 +3631,8 @@ public partial class EditorWindow : Window
         _lastArrowBodyScale = Math.Clamp(preferences.ArrowBodyScale ?? DefaultArrowBodyScale, 0.15, 3.0);
         _lastArrowFrontScale = Math.Clamp(preferences.ArrowFrontScale ?? DefaultArrowFrontScale, 0.15, 3.0);
         _lastArrowHeadScale = Math.Clamp(preferences.ArrowHeadScale ?? DefaultArrowHeadScale, 0.2, 1.6);
+        _lastArrowTailRoundness = Math.Clamp(preferences.ArrowTailRoundness ?? DefaultArrowTailRoundness, 0, 1);
+        _lastArrowHeadRoundness = Math.Clamp(preferences.ArrowHeadRoundness ?? DefaultArrowHeadRoundness, 0, 1);
         _lastArrowShadowStrength = Math.Clamp(preferences.ArrowShadowStrength ?? DefaultArrowShadowStrength, 0, 1);
         _lastArrowBorderWidth = Math.Clamp(preferences.ArrowBorderWidth ?? DefaultArrowBorderWidth, 0, 12);
         _lastArrowHasStartHead = preferences.ArrowHasStartHead == true;
@@ -3551,6 +3646,8 @@ public partial class EditorWindow : Window
             _lastArrowFrontScale = selectedPreset.FrontScale;
             _lastArrowHeadScale = selectedPreset.HeadScale;
             _lastArrowTailHeadScale = Math.Clamp(selectedPreset.TailHeadScale ?? 1.0, 0.2, 1.6);
+            _lastArrowTailRoundness = Math.Clamp(selectedPreset.TailRoundness ?? DefaultArrowTailRoundness, 0, 1);
+            _lastArrowHeadRoundness = Math.Clamp(selectedPreset.HeadRoundness ?? DefaultArrowHeadRoundness, 0, 1);
             _lastArrowShadowStrength = selectedPreset.ShadowStrength;
             _lastArrowBorderWidth = selectedPreset.BorderWidth;
             _lastArrowHasStartHead = selectedPreset.HasStartHead == true;
@@ -3604,6 +3701,8 @@ public partial class EditorWindow : Window
             ArrowBodyScale: _lastArrowBodyScale,
             ArrowFrontScale: _lastArrowFrontScale,
             ArrowHeadScale: _lastArrowHeadScale,
+            ArrowTailRoundness: _lastArrowTailRoundness,
+            ArrowHeadRoundness: _lastArrowHeadRoundness,
             ArrowShadowStrength: _lastArrowShadowStrength,
             ArrowBorderWidth: _lastArrowBorderWidth,
             ArrowHasStartHead: _lastArrowHasStartHead,
@@ -3647,6 +3746,8 @@ public partial class EditorWindow : Window
             HasStartHead: preset.HasStartHead == true,
             HasEndHead: preset.HasEndHead ?? true,
             TailHeadScale: Math.Clamp(preset.TailHeadScale ?? 1.0, 0.2, 1.6),
+            TailRoundness: Math.Clamp(preset.TailRoundness ?? DefaultArrowTailRoundness, 0, 1),
+            HeadRoundness: Math.Clamp(preset.HeadRoundness ?? DefaultArrowHeadRoundness, 0, 1),
             BendPoints: (preset.BendPoints ?? [])
                 .Select(point => new ArrowPresetPointPreference(point.U, point.V))
                 .ToList());
@@ -5490,6 +5591,10 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
 
     public double TailHeadScale { get; private set; } = 1.0;
 
+    public double TailRoundness { get; private set; } = EditorWindow.DefaultArrowTailRoundness;
+
+    public double HeadRoundness { get; private set; } = EditorWindow.DefaultArrowHeadRoundness;
+
     public double ShadowStrength { get; private set; }
 
     public double BorderWidth { get; private set; }
@@ -5507,6 +5612,10 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
     public void SetHeadScale(double value) => HeadScale = Math.Clamp(value, 0.2, 1.6);
 
     public void SetTailHeadScale(double value) => TailHeadScale = Math.Clamp(value, 0.2, 1.6);
+
+    public void SetTailRoundness(double value) => TailRoundness = Math.Clamp(value, 0, 1);
+
+    public void SetHeadRoundness(double value) => HeadRoundness = Math.Clamp(value, 0, 1);
 
     public void SetShadowStrength(double value) => ShadowStrength = Math.Clamp(value, 0, 1);
 
@@ -5819,6 +5928,8 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
             FrontScale = FrontScale,
             HeadScale = HeadScale,
             TailHeadScale = TailHeadScale,
+            TailRoundness = TailRoundness,
+            HeadRoundness = HeadRoundness,
             ShadowStrength = ShadowStrength,
             BorderWidth = BorderWidth,
             HasStartHead = HasStartHead,
@@ -6020,16 +6131,11 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
 
         var figure = new PathFigure
         {
-            StartPoint = HasStartHead ? tailTip : leftEdge[0],
+            StartPoint = HasStartHead ? tailLeftBarb : leftEdge[0],
             IsClosed = true,
             IsFilled = true,
             Segments = new PathSegmentCollection(),
         };
-
-        if (HasStartHead)
-        {
-            figure.Segments.Add(new LineSegment(tailLeftBarb, true));
-        }
 
         for (var i = HasStartHead ? 0 : 1; i < leftEdge.Count; i++)
         {
@@ -6041,9 +6147,12 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
             // Replace the last left point with the precise shaftLeftBase to avoid micro-misalignment with the head.
             figure.Segments.Add(new LineSegment(shaftLeftBase, true));
             figure.Segments.Add(new LineSegment(headLeftBarb, true));
-            figure.Segments.Add(new LineSegment(tip, true));
-            figure.Segments.Add(new LineSegment(headRightBarb, true));
+            AddRoundedHeadTip(figure, headLeftBarb, tip, headRightBarb, headLength, HeadRoundness);
             figure.Segments.Add(new LineSegment(shaftRightBase, true));
+        }
+        else
+        {
+            AddRoundedEndCap(figure, leftEdge[^1], rightEdge[^1], endDir, halfShaftBase * FrontScale, HeadRoundness);
         }
 
         for (var i = rightEdge.Count - 1; i >= 0; i--)
@@ -6054,9 +6163,58 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
         if (HasStartHead)
         {
             figure.Segments.Add(new LineSegment(tailRightBarb, true));
+            AddRoundedHeadTip(figure, tailRightBarb, tailTip, tailLeftBarb, tailHeadLength, TailRoundness);
+        }
+        else
+        {
+            AddRoundedEndCap(figure, rightEdge[0], leftEdge[0], -startDir, halfShaftBase * TailScale, TailRoundness);
         }
 
         return new PathGeometry([figure]) { FillRule = FillRule.Nonzero };
+    }
+
+    private static void AddRoundedEndCap(PathFigure figure, Point from, Point to, Vector outwardDirection, double halfShaft, double roundness)
+    {
+        roundness = Math.Clamp(roundness, 0, 1);
+        if (roundness <= 0.001 || outwardDirection.Length < 0.001 || halfShaft <= 0.001)
+        {
+            figure.Segments.Add(new LineSegment(to, true));
+            return;
+        }
+
+        outwardDirection.Normalize();
+        var capDepth = Math.Clamp(halfShaft * roundness * 1.65, 0, halfShaft * 1.65);
+        var controlOffset = outwardDirection * capDepth;
+        figure.Segments.Add(new BezierSegment(
+            from + controlOffset,
+            to + controlOffset,
+            to,
+            true));
+    }
+
+    private static void AddRoundedHeadTip(PathFigure figure, Point leftBarb, Point tip, Point rightBarb, double headLength, double roundness)
+    {
+        roundness = Math.Clamp(roundness, 0, 1);
+        if (roundness <= 0.001 || headLength <= 0.001)
+        {
+            figure.Segments.Add(new LineSegment(tip, true));
+            figure.Segments.Add(new LineSegment(rightBarb, true));
+            return;
+        }
+
+        var edgeT = Math.Clamp(roundness * 0.48, 0, 0.48);
+        var leftShoulder = Lerp(tip, leftBarb, edgeT);
+        var rightShoulder = Lerp(tip, rightBarb, edgeT);
+        figure.Segments.Add(new LineSegment(leftShoulder, true));
+        figure.Segments.Add(new BezierSegment(tip, tip, rightShoulder, true));
+        figure.Segments.Add(new LineSegment(rightBarb, true));
+    }
+
+    private static Point Lerp(Point from, Point to, double amount)
+    {
+        return new Point(
+            from.X + ((to.X - from.X) * amount),
+            from.Y + ((to.Y - from.Y) * amount));
     }
 
     private static double ShaftScaleAt(double t, double tail, double body, double front)

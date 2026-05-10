@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private SnapshotPreviewWindow? _previewWindow;
     private bool _startHiddenInTray;
     private bool _isUpdatingStartupToggle;
+    private bool _hotKeysRegistered;
 
     public MainWindow(bool startHiddenInTray = false)
     {
@@ -48,6 +49,7 @@ public partial class MainWindow : Window
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D6, BeginClipboardCaptureFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D7, BeginEditorCaptureFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D8, BeginClipboardEditorFromHotKey),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D9, BeginScrollingWindowCaptureFromHotKey),
         ];
 
         if (_startHiddenInTray)
@@ -68,9 +70,35 @@ public partial class MainWindow : Window
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
     {
-        foreach (var hotKeyManager in _hotKeyManagers)
+        RegisterGlobalHotKeys();
+    }
+
+    internal void InitializeHiddenTrayMode()
+    {
+        _startHiddenInTray = false;
+        ShowInTaskbar = false;
+        RegisterGlobalHotKeys();
+    }
+
+    private void RegisterGlobalHotKeys()
+    {
+        if (_hotKeysRegistered)
         {
-            hotKeyManager.Register();
+            return;
+        }
+
+        _hotKeysRegistered = true;
+        try
+        {
+            foreach (var hotKeyManager in _hotKeyManagers)
+            {
+                hotKeyManager.Register();
+            }
+        }
+        catch
+        {
+            _hotKeysRegistered = false;
+            throw;
         }
     }
 
@@ -293,6 +321,11 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(OpenClipboardInEditor);
     }
 
+    private void BeginScrollingWindowCaptureFromHotKey()
+    {
+        Dispatcher.Invoke(StartScrollingWindowCapture);
+    }
+
     private void StartCapture()
     {
         StartCapture(CaptureLaunchMode.ChooseAction);
@@ -323,7 +356,7 @@ public partial class MainWindow : Window
             var result = overlay.ShowDialog();
             RestoreCursor();
 
-            if (result != true || overlay.CaptureResult is null)
+            if (overlay.CaptureResult is null)
             {
                 return;
             }
@@ -338,6 +371,49 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             System.Windows.MessageBox.Show(this, exception.Message, "Capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void StartScrollingWindowCapture()
+    {
+        try
+        {
+            var originalCursor = GetCursorPosition();
+            var cursorRestored = false;
+
+            void RestoreCursor()
+            {
+                if (cursorRestored)
+                {
+                    return;
+                }
+
+                SetCursorPosition(originalCursor);
+                cursorRestored = true;
+            }
+
+            MoveCursorToPrimaryScreen();
+            var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
+            var overlay = new CaptureOverlayWindow(captureFrame, CaptureLaunchMode.OpenEditor, CaptureSelectionMode.Window);
+            overlay.ContentRendered += (_, _) => RestoreCursor();
+            var result = overlay.ShowDialog();
+            RestoreCursor();
+
+            if (result != true || overlay.SelectedWindow is null)
+            {
+                return;
+            }
+
+            var image = _screenCaptureService.CaptureScrollingWindow(overlay.SelectedWindow.Handle);
+            ShowCapturePreview(image);
+            OpenEditor(image);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            System.Windows.MessageBox.Show(this, exception.Message, "Scrolling capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
