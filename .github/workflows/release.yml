@@ -10,6 +10,11 @@ on:
         description: "Semantic version to publish, for example 0.1.0"
         required: true
         type: string
+      signpathEnabled:
+        description: "Enable SignPath signing steps"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   release:
@@ -25,6 +30,7 @@ jobs:
       PUBLISH_DIR: artifacts/publish/win-x64
       INSTALLER_DIR: artifacts/installer
       PORTABLE_DIR: artifacts/portable
+      SIGNPATH_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.signpathEnabled || 'false' }}
 
     steps:
       - name: Check out repository
@@ -84,6 +90,7 @@ jobs:
           if-no-files-found: error
 
       - name: Validate SignPath token
+        if: ${{ env.SIGNPATH_ENABLED == 'true' }}
         shell: pwsh
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -136,6 +143,7 @@ jobs:
           }
 
       - name: Sign app via SignPath
+        if: ${{ env.SIGNPATH_ENABLED == 'true' }}
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -173,6 +181,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign installer via SignPath
+        if: ${{ env.SIGNPATH_ENABLED == 'true' }}
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
