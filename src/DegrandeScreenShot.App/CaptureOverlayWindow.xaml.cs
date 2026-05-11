@@ -19,6 +19,10 @@ public partial class CaptureOverlayWindow : Window
     private const int HybridClickDragThreshold = 4;
     private const int HintPanelTopMargin = 28;
     private const int HintPanelMousePadding = 48;
+    private const int MinimumSelectableWindowSize = 8;
+    private const int MinimumSelectableRegionWidth = 48;
+    private const int MinimumSelectableRegionHeight = 24;
+    private const int MinimumSelectableRegionArea = 4_000;
     private readonly CaptureFrame _captureFrame;
     private readonly CaptureLaunchMode _launchMode;
     private readonly CaptureSelectionMode _selectionMode;
@@ -452,21 +456,21 @@ public partial class CaptureOverlayWindow : Window
         if (_selectionMode == CaptureSelectionMode.Window)
         {
             HintTitleText.Text = "Select a window";
-            HintDescriptionText.Text = "Move over a window and click to capture a scrolling image from top to bottom. Esc cancels.";
+            HintDescriptionText.Text = "Move over a visible window and click to capture it. Esc cancels.";
             return;
         }
 
         if (_selectionMode == CaptureSelectionMode.WindowOrRegion)
         {
             HintTitleText.Text = "Select a window or region";
-            HintDescriptionText.Text = "Click a window to capture it, or drag to select a region. Hold Shift for 1:1, Ctrl to move the frame, Esc cancels.";
+            HintDescriptionText.Text = "Click a visible window or pane, or drag to select a custom region. Hold Shift for 1:1, Ctrl to move the frame, Esc cancels.";
             return;
         }
 
         if (_selectionMode == CaptureSelectionMode.ScrollTarget)
         {
             HintTitleText.Text = "Select scroll area";
-            HintDescriptionText.Text = "Click a window or element, or drag around the scrollable content area to stitch only that area. Esc cancels.";
+            HintDescriptionText.Text = "Click a visible window or pane, or drag around the scrollable content area to stitch only that area. Esc cancels.";
             return;
         }
 
@@ -530,31 +534,36 @@ public partial class CaptureOverlayWindow : Window
     private CaptureTargetSelection? GetTargetSelectionAt(PixelPoint overlayPoint)
     {
         var windowSelection = GetWindowSelectionAt(overlayPoint);
-        if (windowSelection is null || _selectionMode == CaptureSelectionMode.Window)
+        if (windowSelection is null)
         {
-            return windowSelection is null ? null : new CaptureTargetSelection(windowSelection, windowSelection.Bounds, null);
+            return null;
         }
 
-        var screenPoint = new NativePoint(overlayPoint.X + _captureFrame.VirtualLeft, overlayPoint.Y + _captureFrame.VirtualTop);
-        var elementBounds = TryGetElementBounds(windowSelection.Handle, screenPoint, windowSelection.Bounds);
-        if (elementBounds is null)
+        if (_selectionMode == CaptureSelectionMode.Window)
         {
             return new CaptureTargetSelection(windowSelection, windowSelection.Bounds, null);
         }
 
-        return new CaptureTargetSelection(windowSelection, elementBounds.Value, elementBounds.Value);
+        var screenPoint = new NativePoint(overlayPoint.X + _captureFrame.VirtualLeft, overlayPoint.Y + _captureFrame.VirtualTop);
+        var regionBounds = TryGetLogicalRegionBounds(windowSelection.Handle, screenPoint, windowSelection.Bounds);
+        return regionBounds is { HasArea: true }
+            ? new CaptureTargetSelection(windowSelection, regionBounds.Value, regionBounds.Value)
+            : new CaptureTargetSelection(windowSelection, windowSelection.Bounds, null);
     }
 
     private WindowSelection? GetWindowSelectionAt(PixelPoint overlayPoint)
     {
         var screenPoint = new NativePoint(overlayPoint.X + _captureFrame.VirtualLeft, overlayPoint.Y + _captureFrame.VirtualTop);
         var overlayHandle = new WindowInteropHelper(this).Handle;
-        WindowSelection? bestMatch = null;
-        var bestArea = int.MaxValue;
 
         for (var handle = GetTopWindow(IntPtr.Zero); handle != IntPtr.Zero; handle = GetWindow(handle, GwHwndNext))
         {
-            if (handle == overlayHandle || !IsWindowVisible(handle) || IsIconic(handle) || !TryGetVisibleWindowRect(handle, out var rect))
+            if (handle == overlayHandle
+                || !IsWindowVisible(handle)
+                || IsIconic(handle)
+                || IsWindowCloaked(handle)
+                || IsWindowFullyTransparent(handle)
+                || !TryGetVisibleWindowRect(handle, out var rect))
             {
                 continue;
             }
@@ -564,30 +573,21 @@ public partial class CaptureOverlayWindow : Window
                 continue;
             }
 
-            var left = Math.Max(0, rect.Left - _captureFrame.VirtualLeft);
-            var top = Math.Max(0, rect.Top - _captureFrame.VirtualTop);
-            var right = Math.Min(_captureFrame.Width, rect.Right - _captureFrame.VirtualLeft);
-            var bottom = Math.Min(_captureFrame.Height, rect.Bottom - _captureFrame.VirtualTop);
-            if (right <= left || bottom <= top)
+            var bounds = ToVisibleOverlayBounds(rect);
+            if (bounds is not { HasArea: true }
+                || bounds.Value.Width < MinimumSelectableWindowSize
+                || bounds.Value.Height < MinimumSelectableWindowSize)
             {
                 continue;
             }
 
-            var bounds = new PixelRect(left, top, right - left, bottom - top);
-            var area = bounds.Width * bounds.Height;
-            if (area >= bestArea)
-            {
-                continue;
-            }
-
-            bestArea = area;
-            bestMatch = new WindowSelection(handle, bounds);
+            return new WindowSelection(handle, bounds.Value);
         }
 
-        return bestMatch;
+        return null;
     }
 
-    private PixelRect? TryGetElementBounds(IntPtr windowHandle, NativePoint screenPoint, PixelRect windowBounds)
+    private PixelRect? TryGetLogicalRegionBounds(IntPtr windowHandle, NativePoint screenPoint, PixelRect windowBounds)
     {
         try
         {
@@ -597,13 +597,10 @@ public partial class CaptureOverlayWindow : Window
                 return null;
             }
 
-            var bestBounds = FindSmallestElementBounds(rootElement, screenPoint, windowBounds);
-            if (bestBounds is null || bestBounds.Value.Width >= windowBounds.Width - 8 && bestBounds.Value.Height >= windowBounds.Height - 8)
-            {
-                return null;
-            }
-
-            return bestBounds;
+            var walker = TreeWalker.ControlViewWalker;
+            LogicalRegionCandidate? bestCandidate = null;
+            FindLogicalRegionBounds(rootElement, screenPoint, windowBounds, walker, ref bestCandidate, depth: 0);
+            return bestCandidate?.Bounds;
         }
         catch (ElementNotAvailableException)
         {
@@ -619,25 +616,15 @@ public partial class CaptureOverlayWindow : Window
         }
     }
 
-    private PixelRect? FindSmallestElementBounds(AutomationElement rootElement, NativePoint screenPoint, PixelRect windowBounds)
-    {
-        PixelRect? bestBounds = null;
-        var bestArea = windowBounds.Width * windowBounds.Height;
-        var walker = TreeWalker.ControlViewWalker;
-        FindSmallestElementBounds(rootElement, screenPoint, windowBounds, walker, ref bestBounds, ref bestArea, depth: 0);
-        return bestBounds;
-    }
-
-    private void FindSmallestElementBounds(
+    private void FindLogicalRegionBounds(
         AutomationElement element,
         NativePoint screenPoint,
         PixelRect windowBounds,
         TreeWalker walker,
-        ref PixelRect? bestBounds,
-        ref int bestArea,
+        ref LogicalRegionCandidate? bestCandidate,
         int depth)
     {
-        const int maxDepth = 8;
+        const int maxDepth = 9;
         if (depth > maxDepth)
         {
             return;
@@ -645,12 +632,27 @@ public partial class CaptureOverlayWindow : Window
 
         for (var child = walker.GetFirstChild(element); child is not null; child = walker.GetNextSibling(child))
         {
+            AutomationElement.AutomationElementInformation current;
             PixelRect? childBounds;
             try
             {
-                childBounds = ToOverlayRect(child.Current.BoundingRectangle);
+                current = child.Current;
+                if (current.IsOffscreen)
+                {
+                    continue;
+                }
+
+                childBounds = ToOverlayRect(current.BoundingRectangle);
             }
             catch (ElementNotAvailableException)
+            {
+                continue;
+            }
+            catch (InvalidOperationException)
+            {
+                continue;
+            }
+            catch (COMException)
             {
                 continue;
             }
@@ -666,15 +668,79 @@ public partial class CaptureOverlayWindow : Window
                 continue;
             }
 
-            var area = clippedBounds.Value.Width * clippedBounds.Value.Height;
-            if (area >= 64 && area < bestArea)
+            var priority = GetLogicalRegionPriority(current.ControlType);
+            if (priority > 0 && IsSelectableRegionBounds(clippedBounds.Value, windowBounds))
             {
-                bestBounds = clippedBounds;
-                bestArea = area;
+                var area = (long)clippedBounds.Value.Width * clippedBounds.Value.Height;
+                var candidate = new LogicalRegionCandidate(clippedBounds.Value, priority, area, depth);
+                if (IsBetterLogicalRegion(candidate, bestCandidate))
+                {
+                    bestCandidate = candidate;
+                }
             }
 
-            FindSmallestElementBounds(child, screenPoint, windowBounds, walker, ref bestBounds, ref bestArea, depth + 1);
+            FindLogicalRegionBounds(child, screenPoint, windowBounds, walker, ref bestCandidate, depth + 1);
         }
+    }
+
+    private static bool IsSelectableRegionBounds(PixelRect bounds, PixelRect windowBounds)
+    {
+        if (bounds.Width < MinimumSelectableRegionWidth
+            || bounds.Height < MinimumSelectableRegionHeight
+            || (long)bounds.Width * bounds.Height < MinimumSelectableRegionArea)
+        {
+            return false;
+        }
+
+        return bounds.Width < windowBounds.Width - 8 || bounds.Height < windowBounds.Height - 8;
+    }
+
+    private static bool IsBetterLogicalRegion(LogicalRegionCandidate candidate, LogicalRegionCandidate? currentBest)
+    {
+        if (currentBest is null)
+        {
+            return true;
+        }
+
+        if (candidate.Priority != currentBest.Priority)
+        {
+            return candidate.Priority > currentBest.Priority;
+        }
+
+        if (candidate.Area != currentBest.Area)
+        {
+            return candidate.Area < currentBest.Area;
+        }
+
+        return candidate.Depth > currentBest.Depth;
+    }
+
+    private static int GetLogicalRegionPriority(ControlType controlType)
+    {
+        if (controlType == ControlType.List
+            || controlType == ControlType.Tree
+            || controlType == ControlType.DataGrid
+            || controlType == ControlType.Table
+            || controlType == ControlType.Document)
+        {
+            return 700;
+        }
+
+        if (controlType == ControlType.Pane
+            || controlType == ControlType.Group
+            || controlType == ControlType.Custom)
+        {
+            return 550;
+        }
+
+        if (controlType == ControlType.ToolBar
+            || controlType == ControlType.MenuBar
+            || controlType == ControlType.Tab)
+        {
+            return 425;
+        }
+
+        return 0;
     }
 
     private PixelRect? ToOverlayRect(Rect rect)
@@ -719,6 +785,20 @@ public partial class CaptureOverlayWindow : Window
             overlayRect.Height);
     }
 
+    private PixelRect? ToVisibleOverlayBounds(NativeRect rect)
+    {
+        var left = Math.Max(0, rect.Left - _captureFrame.VirtualLeft);
+        var top = Math.Max(0, rect.Top - _captureFrame.VirtualTop);
+        var right = Math.Min(_captureFrame.Width, rect.Right - _captureFrame.VirtualLeft);
+        var bottom = Math.Min(_captureFrame.Height, rect.Bottom - _captureFrame.VirtualTop);
+        if (right <= left || bottom <= top)
+        {
+            return null;
+        }
+
+        return new PixelRect(left, top, right - left, bottom - top);
+    }
+
     private static bool TryGetVisibleWindowRect(IntPtr handle, out NativeRect rect)
     {
         if (DwmGetWindowAttribute(handle, DwmWindowAttributeExtendedFrameBounds, out rect, Marshal.SizeOf<NativeRect>()) == 0
@@ -729,6 +809,25 @@ public partial class CaptureOverlayWindow : Window
         }
 
         return GetWindowRect(handle, out rect);
+    }
+
+    private static bool IsWindowCloaked(IntPtr handle)
+    {
+        return DwmGetWindowAttribute(handle, DwmWindowAttributeCloaked, out int cloaked, Marshal.SizeOf<int>()) == 0
+            && cloaked != 0;
+    }
+
+    private static bool IsWindowFullyTransparent(IntPtr handle)
+    {
+        var extendedStyle = GetWindowLong(handle, GwlExStyle);
+        if ((extendedStyle & WsExLayered) == 0)
+        {
+            return false;
+        }
+
+        return GetLayeredWindowAttributes(handle, out _, out var alpha, out var flags)
+            && (flags & LwaAlpha) != 0
+            && alpha == 0;
     }
 
     private void UpdateShadeRects(PixelRect? selection)
@@ -780,7 +879,11 @@ public partial class CaptureOverlayWindow : Window
     }
 
     private const uint GwHwndNext = 2;
+    private const int GwlExStyle = -20;
+    private const int WsExLayered = 0x00080000;
+    private const uint LwaAlpha = 0x00000002;
     private const int DwmWindowAttributeExtendedFrameBounds = 9;
+    private const int DwmWindowAttributeCloaked = 14;
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetTopWindow(IntPtr hWnd);
@@ -800,8 +903,18 @@ public partial class CaptureOverlayWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
 
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+    private static extern int GetWindowLong(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetLayeredWindowAttributes(IntPtr hwnd, out uint colorKey, out byte alpha, out uint flags);
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out NativeRect pvAttribute, int cbAttribute);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
     [StructLayout(LayoutKind.Sequential)]
     private readonly struct NativePoint(int x, int y)
@@ -819,6 +932,8 @@ public partial class CaptureOverlayWindow : Window
         public int Right;
         public int Bottom;
     }
+
+    private sealed record LogicalRegionCandidate(PixelRect Bounds, int Priority, long Area, int Depth);
 }
 
 public enum CaptureLaunchMode
