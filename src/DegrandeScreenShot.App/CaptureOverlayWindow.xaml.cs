@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DegrandeScreenShot.App.Services;
 using DegrandeScreenShot.Core;
@@ -23,6 +25,18 @@ public partial class CaptureOverlayWindow : Window
     private const int MinimumSelectableRegionWidth = 48;
     private const int MinimumSelectableRegionHeight = 24;
     private const int MinimumSelectableRegionArea = 4_000;
+    private const int MinimumBrowserElementWidth = 18;
+    private const int MinimumBrowserElementHeight = 12;
+    private const int MinimumBrowserElementArea = 300;
+    private const int BrowserChromeWholeWindowHeight = 64;
+    private const int BrowserScrollbarContentTopInset = 64;
+    private const int MinimumScrollbarThumbHeight = 28;
+    private const int MaximumScrollbarThumbWidth = 16;
+    private const int ScrollbarRegionRightPadding = 4;
+    private const int MinimumLikelyScrollableBrowserWidth = 140;
+    private const int MinimumLikelyScrollableBrowserHeight = 220;
+    private const int MinimumLikelyScrollableBrowserArea = 32_000;
+    private const int LikelyScrollableBrowserHeightPercent = 42;
     private readonly CaptureFrame _captureFrame;
     private readonly CaptureLaunchMode _launchMode;
     private readonly CaptureSelectionMode _selectionMode;
@@ -32,6 +46,12 @@ public partial class CaptureOverlayWindow : Window
     private PixelRect? _capturedSelectionBounds;
     private CaptureTargetSelection? _hoveredTarget;
     private CaptureTargetSelection? _pressedTarget;
+    private byte[]? _desktopBgraPixels;
+    private int _desktopBgraStride;
+    private readonly Dictionary<IntPtr, IReadOnlyList<PixelRect>> _browserScrollRegionsByWindow = new();
+    private readonly LowLevelKeyboardProc _escapeKeyboardProc;
+    private IntPtr _escapeKeyboardHook;
+    private bool _isCancelling;
 
     public CaptureOverlayWindow(
         CaptureFrame captureFrame,
@@ -39,6 +59,7 @@ public partial class CaptureOverlayWindow : Window
         CaptureSelectionMode selectionMode = CaptureSelectionMode.WindowOrRegion)
     {
         InitializeComponent();
+        _escapeKeyboardProc = EscapeKeyboardHookCallback;
         _captureFrame = captureFrame;
         _launchMode = launchMode;
         _selectionMode = selectionMode;
@@ -53,6 +74,7 @@ public partial class CaptureOverlayWindow : Window
         Canvas.SetTop(FrozenDesktopImage, 0);
 
         Loaded += CaptureOverlayWindow_Loaded;
+        Closed += CaptureOverlayWindow_Closed;
         PreviewKeyDown += CaptureOverlayWindow_PreviewKeyDown;
         KeyDown += CaptureOverlayWindow_KeyDown;
         MouseLeftButtonDown += CaptureOverlayWindow_MouseLeftButtonDown;
@@ -74,8 +96,10 @@ public partial class CaptureOverlayWindow : Window
         Height = _captureFrame.Height;
         OverlayCanvas.Width = _captureFrame.Width;
         OverlayCanvas.Height = _captureFrame.Height;
+        Activate();
         Focus();
         Keyboard.Focus(this);
+        InstallEscapeKeyboardHook();
         ConfigureHintText();
         PositionHintPanel(ToPixelPoint(Mouse.GetPosition(OverlayCanvas)));
         ActionPanel.Visibility = _launchMode == CaptureLaunchMode.ChooseAction ? Visibility.Collapsed : Visibility.Collapsed;
@@ -85,6 +109,11 @@ public partial class CaptureOverlayWindow : Window
         {
             UpdateWindowSelection(ToPixelPoint(Mouse.GetPosition(OverlayCanvas)));
         }
+    }
+
+    private void CaptureOverlayWindow_Closed(object? sender, EventArgs e)
+    {
+        RemoveEscapeKeyboardHook();
     }
 
     private void CaptureOverlayWindow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -263,6 +292,13 @@ public partial class CaptureOverlayWindow : Window
 
     private void CancelCapture()
     {
+        if (_isCancelling)
+        {
+            return;
+        }
+
+        _isCancelling = true;
+        RemoveEscapeKeyboardHook();
         if (Mouse.Captured == this)
         {
             ReleaseMouseCapture();
@@ -276,6 +312,40 @@ public partial class CaptureOverlayWindow : Window
         _hoveredTarget = null;
         _pressedTarget = null;
         Close();
+    }
+
+    private void InstallEscapeKeyboardHook()
+    {
+        if (_escapeKeyboardHook != IntPtr.Zero)
+        {
+            return;
+        }
+
+        _escapeKeyboardHook = SetWindowsHookEx(WhKeyboardLowLevel, _escapeKeyboardProc, IntPtr.Zero, 0);
+    }
+
+    private void RemoveEscapeKeyboardHook()
+    {
+        if (_escapeKeyboardHook == IntPtr.Zero)
+        {
+            return;
+        }
+
+        UnhookWindowsHookEx(_escapeKeyboardHook);
+        _escapeKeyboardHook = IntPtr.Zero;
+    }
+
+    private IntPtr EscapeKeyboardHookCallback(int code, IntPtr wParam, IntPtr lParam)
+    {
+        if (code >= 0
+            && (wParam == WmKeyDown || wParam == WmSysKeyDown)
+            && Marshal.ReadInt32(lParam) == VirtualKeyEscape)
+        {
+            Dispatcher.BeginInvoke((Action)CancelCapture);
+            return 1;
+        }
+
+        return CallNextHookEx(_escapeKeyboardHook, code, wParam, lParam);
     }
 
     private bool IsHybridClickSelection()
@@ -597,9 +667,26 @@ public partial class CaptureOverlayWindow : Window
                 return null;
             }
 
-            var walker = TreeWalker.ControlViewWalker;
+            var isBrowserWindow = IsBrowserWindow(windowHandle);
+            var overlayPoint = ToOverlayPoint(screenPoint);
+            if (isBrowserWindow && overlayPoint.Y < windowBounds.Top + BrowserChromeWholeWindowHeight)
+            {
+                return null;
+            }
+
+            if (isBrowserWindow && TryGetBrowserVisualScrollRegion(windowHandle, overlayPoint, windowBounds) is { } visualScrollRegion)
+            {
+                return visualScrollRegion;
+            }
+
+            if (isBrowserWindow && TryGetBrowserRegionAtPoint(rootElement, screenPoint, windowBounds) is { } browserRegion)
+            {
+                return browserRegion;
+            }
+
+            var walker = isBrowserWindow ? TreeWalker.RawViewWalker : TreeWalker.ControlViewWalker;
             LogicalRegionCandidate? bestCandidate = null;
-            FindLogicalRegionBounds(rootElement, screenPoint, windowBounds, walker, ref bestCandidate, depth: 0);
+            FindLogicalRegionBounds(rootElement, screenPoint, windowBounds, walker, isBrowserWindow, ref bestCandidate, depth: 0);
             return bestCandidate?.Bounds;
         }
         catch (ElementNotAvailableException)
@@ -616,11 +703,305 @@ public partial class CaptureOverlayWindow : Window
         }
     }
 
+    private PixelRect? TryGetBrowserVisualScrollRegion(IntPtr windowHandle, PixelPoint overlayPoint, PixelRect windowBounds)
+    {
+        if (!_browserScrollRegionsByWindow.TryGetValue(windowHandle, out var regions))
+        {
+            regions = CreateBrowserScrollRegions(windowBounds);
+            _browserScrollRegionsByWindow[windowHandle] = regions;
+        }
+
+        PixelRect? bestRegion = null;
+        var bestArea = long.MaxValue;
+        foreach (var region in regions)
+        {
+            if (!region.Contains(overlayPoint))
+            {
+                continue;
+            }
+
+            var area = (long)region.Width * region.Height;
+            if (area >= bestArea)
+            {
+                continue;
+            }
+
+            bestArea = area;
+            bestRegion = region;
+        }
+
+        return bestRegion;
+    }
+
+    private IReadOnlyList<PixelRect> CreateBrowserScrollRegions(PixelRect windowBounds)
+    {
+        var scrollbars = FindVerticalScrollbarCandidates(windowBounds)
+            .OrderBy(scrollbar => scrollbar.Left)
+            .ToArray();
+        if (scrollbars.Length == 0)
+        {
+            return [];
+        }
+
+        var contentTop = Math.Min(windowBounds.Bottom - MinimumSelectableRegionHeight, windowBounds.Top + BrowserScrollbarContentTopInset);
+        var regions = new List<PixelRect>();
+        for (var index = 0; index < scrollbars.Length; index++)
+        {
+            var scrollbar = scrollbars[index];
+            var left = index == 0 ? windowBounds.Left : Math.Min(windowBounds.Right, scrollbars[index - 1].Right + 1);
+            var right = Math.Min(windowBounds.Right, scrollbar.Right + ScrollbarRegionRightPadding);
+            if (right - left < MinimumSelectableRegionWidth || windowBounds.Bottom - contentTop < MinimumSelectableRegionHeight)
+            {
+                continue;
+            }
+
+            regions.Add(new PixelRect(left, contentTop, right - left, windowBounds.Bottom - contentTop));
+        }
+
+        return regions;
+    }
+
+    private IReadOnlyList<ScrollbarCandidate> FindVerticalScrollbarCandidates(PixelRect windowBounds)
+    {
+        var pixels = GetDesktopBgraPixels();
+        if (pixels.Length == 0)
+        {
+            return [];
+        }
+
+        var scanTop = Math.Max(windowBounds.Top + BrowserScrollbarContentTopInset, windowBounds.Top);
+        var scanBottom = Math.Min(windowBounds.Bottom - 2, _captureFrame.Height - 1);
+        var scanLeft = Math.Max(windowBounds.Left + 24, 0);
+        var scanRight = Math.Min(windowBounds.Right - 1, _captureFrame.Width - 1);
+        var scanHeight = scanBottom - scanTop;
+        if (scanHeight < MinimumScrollbarThumbHeight)
+        {
+            return [];
+        }
+
+        var columns = new List<ScrollbarColumnRun>();
+        for (var x = scanLeft; x < scanRight; x++)
+        {
+            if (FindBestNeutralVerticalRun(x, scanTop, scanBottom, pixels, out var run) is not { } bestRun)
+            {
+                continue;
+            }
+
+            if (bestRun.Height < MinimumScrollbarThumbHeight || bestRun.Height > scanHeight - 20)
+            {
+                continue;
+            }
+
+            columns.Add(new ScrollbarColumnRun(x, bestRun.Top, bestRun.Bottom));
+        }
+
+        var candidates = new List<ScrollbarCandidate>();
+        for (var index = 0; index < columns.Count;)
+        {
+            var left = columns[index].X;
+            var right = left;
+            var bestTop = columns[index].Top;
+            var bestBottom = columns[index].Bottom;
+            var bestHeight = columns[index].Height;
+            index++;
+
+            while (index < columns.Count && columns[index].X <= right + 1)
+            {
+                right = columns[index].X;
+                if (columns[index].Height > bestHeight)
+                {
+                    bestTop = columns[index].Top;
+                    bestBottom = columns[index].Bottom;
+                    bestHeight = columns[index].Height;
+                }
+
+                index++;
+            }
+
+            var width = right - left + 1;
+            if (width is < 2 or > MaximumScrollbarThumbWidth)
+            {
+                continue;
+            }
+
+            candidates.Add(new ScrollbarCandidate(left, right + 1, bestTop, bestBottom));
+        }
+
+        return candidates;
+    }
+
+    private ScrollbarColumnRun? FindBestNeutralVerticalRun(int x, int top, int bottom, byte[] pixels, out ScrollbarColumnRun? bestRun)
+    {
+        bestRun = null;
+        var currentTop = 0;
+        var currentHeight = 0;
+        for (var y = top; y < bottom; y++)
+        {
+            if (IsNeutralScrollbarPixel(pixels, x, y))
+            {
+                if (currentHeight == 0)
+                {
+                    currentTop = y;
+                }
+
+                currentHeight++;
+                continue;
+            }
+
+            bestRun = SelectLongerRun(bestRun, x, currentTop, currentHeight);
+            currentHeight = 0;
+        }
+
+        bestRun = SelectLongerRun(bestRun, x, currentTop, currentHeight);
+        return bestRun;
+    }
+
+    private static ScrollbarColumnRun? SelectLongerRun(ScrollbarColumnRun? currentBest, int x, int top, int height)
+    {
+        if (height <= 0 || currentBest is not null && currentBest.Height >= height)
+        {
+            return currentBest;
+        }
+
+        return new ScrollbarColumnRun(x, top, top + height);
+    }
+
+    private bool IsNeutralScrollbarPixel(byte[] pixels, int x, int y)
+    {
+        var offset = (y * _desktopBgraStride) + (x * 4);
+        if (offset < 0 || offset + 2 >= pixels.Length)
+        {
+            return false;
+        }
+
+        var blue = pixels[offset];
+        var green = pixels[offset + 1];
+        var red = pixels[offset + 2];
+        var min = Math.Min(red, Math.Min(green, blue));
+        var max = Math.Max(red, Math.Max(green, blue));
+        var brightness = (red + green + blue) / 3;
+        return max - min <= 24 && brightness is >= 42 and <= 215;
+    }
+
+    private byte[] GetDesktopBgraPixels()
+    {
+        if (_desktopBgraPixels is not null)
+        {
+            return _desktopBgraPixels;
+        }
+
+        var source = _captureFrame.Bitmap.Format == PixelFormats.Bgra32
+            ? _captureFrame.Bitmap
+            : new FormatConvertedBitmap(_captureFrame.Bitmap, PixelFormats.Bgra32, null, 0);
+        _desktopBgraStride = source.PixelWidth * 4;
+        _desktopBgraPixels = new byte[_desktopBgraStride * source.PixelHeight];
+        source.CopyPixels(_desktopBgraPixels, _desktopBgraStride, 0);
+        return _desktopBgraPixels;
+    }
+
+    private PixelRect? TryGetBrowserRegionAtPoint(AutomationElement rootElement, NativePoint screenPoint, PixelRect windowBounds)
+    {
+        try
+        {
+            var pointElement = AutomationElement.FromPoint(new Point(screenPoint.X, screenPoint.Y));
+            if (pointElement is null)
+            {
+                return null;
+            }
+
+            var walker = TreeWalker.RawViewWalker;
+            LogicalRegionCandidate? bestCandidate = null;
+            var element = pointElement;
+            for (var distanceFromPoint = 0; element is not null && distanceFromPoint <= 14; distanceFromPoint++)
+            {
+                if (TryCreateBrowserPointCandidate(element, screenPoint, windowBounds, distanceFromPoint) is { } candidate
+                    && IsBetterLogicalRegion(candidate, bestCandidate))
+                {
+                    bestCandidate = candidate;
+                }
+
+                if (AutomationElement.Equals(element, rootElement))
+                {
+                    break;
+                }
+
+                element = walker.GetParent(element);
+            }
+
+            return bestCandidate?.Bounds;
+        }
+        catch (ElementNotAvailableException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+    }
+
+    private LogicalRegionCandidate? TryCreateBrowserPointCandidate(
+        AutomationElement element,
+        NativePoint screenPoint,
+        PixelRect windowBounds,
+        int distanceFromPoint)
+    {
+        AutomationElement.AutomationElementInformation current;
+        PixelRect? elementBounds;
+        try
+        {
+            current = element.Current;
+            if (current.IsOffscreen)
+            {
+                return null;
+            }
+
+            elementBounds = ToOverlayRect(current.BoundingRectangle);
+        }
+        catch (ElementNotAvailableException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+
+        if (elementBounds is not { HasArea: true } bounds || !bounds.Contains(ToOverlayPoint(screenPoint)))
+        {
+            return null;
+        }
+
+        var clippedBounds = ClipToWindow(bounds, windowBounds);
+        if (clippedBounds is not { HasArea: true } || !IsSelectableBrowserElementBounds(clippedBounds.Value, windowBounds))
+        {
+            return null;
+        }
+
+        var priority = GetBrowserPointRegionPriority(element, current, clippedBounds.Value, windowBounds);
+        if (priority <= 0)
+        {
+            return null;
+        }
+
+        var area = (long)clippedBounds.Value.Width * clippedBounds.Value.Height;
+        return new LogicalRegionCandidate(clippedBounds.Value, priority, area, 32 - distanceFromPoint);
+    }
+
     private void FindLogicalRegionBounds(
         AutomationElement element,
         NativePoint screenPoint,
         PixelRect windowBounds,
         TreeWalker walker,
+        bool isBrowserWindow,
         ref LogicalRegionCandidate? bestCandidate,
         int depth)
     {
@@ -668,7 +1049,7 @@ public partial class CaptureOverlayWindow : Window
                 continue;
             }
 
-            var priority = GetLogicalRegionPriority(current.ControlType);
+            var priority = GetLogicalRegionPriority(child, current, clippedBounds.Value, windowBounds, isBrowserWindow);
             if (priority > 0 && IsSelectableRegionBounds(clippedBounds.Value, windowBounds))
             {
                 var area = (long)clippedBounds.Value.Width * clippedBounds.Value.Height;
@@ -679,7 +1060,7 @@ public partial class CaptureOverlayWindow : Window
                 }
             }
 
-            FindLogicalRegionBounds(child, screenPoint, windowBounds, walker, ref bestCandidate, depth + 1);
+            FindLogicalRegionBounds(child, screenPoint, windowBounds, walker, isBrowserWindow, ref bestCandidate, depth + 1);
         }
     }
 
@@ -688,6 +1069,18 @@ public partial class CaptureOverlayWindow : Window
         if (bounds.Width < MinimumSelectableRegionWidth
             || bounds.Height < MinimumSelectableRegionHeight
             || (long)bounds.Width * bounds.Height < MinimumSelectableRegionArea)
+        {
+            return false;
+        }
+
+        return bounds.Width < windowBounds.Width - 8 || bounds.Height < windowBounds.Height - 8;
+    }
+
+    private static bool IsSelectableBrowserElementBounds(PixelRect bounds, PixelRect windowBounds)
+    {
+        if (bounds.Width < MinimumBrowserElementWidth
+            || bounds.Height < MinimumBrowserElementHeight
+            || (long)bounds.Width * bounds.Height < MinimumBrowserElementArea)
         {
             return false;
         }
@@ -715,8 +1108,33 @@ public partial class CaptureOverlayWindow : Window
         return candidate.Depth > currentBest.Depth;
     }
 
-    private static int GetLogicalRegionPriority(ControlType controlType)
+    private static int GetLogicalRegionPriority(
+        AutomationElement element,
+        AutomationElement.AutomationElementInformation current,
+        PixelRect bounds,
+        PixelRect windowBounds,
+        bool isBrowserWindow)
     {
+        var controlType = current.ControlType;
+        if (isBrowserWindow)
+        {
+            if (IsVerticallyScrollableElement(element))
+            {
+                return 1_180;
+            }
+
+            if (IsLikelyScrollableBrowserContentBounds(bounds, windowBounds))
+            {
+                return 1_060;
+            }
+
+            var semanticPriority = GetBrowserSemanticRegionPriority(current);
+            if (semanticPriority > 0)
+            {
+                return semanticPriority;
+            }
+        }
+
         if (controlType == ControlType.List
             || controlType == ControlType.Tree
             || controlType == ControlType.DataGrid
@@ -741,6 +1159,167 @@ public partial class CaptureOverlayWindow : Window
         }
 
         return 0;
+    }
+
+    private static int GetBrowserSemanticRegionPriority(AutomationElement.AutomationElementInformation element)
+    {
+        var controlType = element.ControlType;
+        var name = element.Name ?? string.Empty;
+        var localizedType = element.LocalizedControlType ?? string.Empty;
+        var className = element.ClassName ?? string.Empty;
+
+        if (ContainsAnySemanticText(name, localizedType, className, "main", "article", "content", "document"))
+        {
+            return controlType == ControlType.Document ? 960 : 940;
+        }
+
+        if (ContainsAnySemanticText(name, localizedType, className, "navigation", "nav", "sidebar", "side bar", "complementary", "aside"))
+        {
+            return 930;
+        }
+
+        if (ContainsAnySemanticText(name, localizedType, className, "search", "form", "feed", "timeline", "results", "comments"))
+        {
+            return 900;
+        }
+
+        if (controlType == ControlType.Document)
+        {
+            return 880;
+        }
+
+        if (controlType == ControlType.Table || controlType == ControlType.DataGrid)
+        {
+            return 860;
+        }
+
+        if (controlType == ControlType.List || controlType == ControlType.Tree)
+        {
+            return 835;
+        }
+
+        if (controlType == ControlType.Pane || controlType == ControlType.Group || controlType == ControlType.Custom)
+        {
+            if (ContainsAnySemanticText(localizedType, className, name, "section", "region", "landmark", "panel", "container"))
+            {
+                return 760;
+            }
+        }
+
+        return 0;
+    }
+
+    private static int GetBrowserPointRegionPriority(
+        AutomationElement element,
+        AutomationElement.AutomationElementInformation current,
+        PixelRect bounds,
+        PixelRect windowBounds)
+    {
+        var controlType = current.ControlType;
+        var name = current.Name ?? string.Empty;
+        var localizedType = current.LocalizedControlType ?? string.Empty;
+        var className = current.ClassName ?? string.Empty;
+
+        if (IsVerticallyScrollableElement(element))
+        {
+            return 1_220;
+        }
+
+        if (IsLikelyScrollableBrowserContentBounds(bounds, windowBounds))
+        {
+            return 1_120;
+        }
+
+        if (ContainsAnySemanticText(name, localizedType, className, "heading", "header", "banner", "card", "dialog"))
+        {
+            return 880;
+        }
+
+        if (controlType == ControlType.Text
+            || controlType == ControlType.Hyperlink
+            || controlType == ControlType.Button
+            || controlType == ControlType.Edit
+            || controlType == ControlType.Image)
+        {
+            return 620;
+        }
+
+        if (ContainsAnySemanticText(name, localizedType, className, "main", "article", "content", "navigation", "nav", "sidebar", "section", "region", "landmark", "aside"))
+        {
+            return 910;
+        }
+
+        if (controlType == ControlType.Group
+            || controlType == ControlType.Pane
+            || controlType == ControlType.Custom)
+        {
+            return 880;
+        }
+
+        if (controlType == ControlType.Table
+            || controlType == ControlType.DataGrid
+            || controlType == ControlType.List
+            || controlType == ControlType.Tree)
+        {
+            return 850;
+        }
+
+        if (controlType == ControlType.Document)
+        {
+            return 700;
+        }
+
+        return 0;
+    }
+
+    private static bool IsLikelyScrollableBrowserContentBounds(PixelRect bounds, PixelRect windowBounds)
+    {
+        var minimumHeight = Math.Max(MinimumLikelyScrollableBrowserHeight, windowBounds.Height * LikelyScrollableBrowserHeightPercent / 100);
+        if (bounds.Width < MinimumLikelyScrollableBrowserWidth
+            || bounds.Height < minimumHeight
+            || (long)bounds.Width * bounds.Height < MinimumLikelyScrollableBrowserArea)
+        {
+            return false;
+        }
+
+        return bounds.Width < windowBounds.Width - 8 || bounds.Height < windowBounds.Height - 8;
+    }
+
+    private static bool IsVerticallyScrollableElement(AutomationElement element)
+    {
+        try
+        {
+            return element.TryGetCurrentPattern(ScrollPattern.Pattern, out var pattern)
+                && pattern is ScrollPattern scrollPattern
+                && scrollPattern.Current.VerticallyScrollable;
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ContainsAnySemanticText(string primaryText, string secondaryText, string tertiaryText, params string[] terms)
+    {
+        foreach (var term in terms)
+        {
+            if (primaryText.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || secondaryText.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || tertiaryText.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private PixelRect? ToOverlayRect(Rect rect)
@@ -830,6 +1409,36 @@ public partial class CaptureOverlayWindow : Window
             && alpha == 0;
     }
 
+    private static bool IsBrowserWindow(IntPtr handle)
+    {
+        _ = GetWindowThreadProcessId(handle, out var processId);
+        if (processId == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            var processName = process.ProcessName;
+            return processName.Equals("chrome", StringComparison.OrdinalIgnoreCase)
+                || processName.Equals("msedge", StringComparison.OrdinalIgnoreCase)
+                || processName.Equals("firefox", StringComparison.OrdinalIgnoreCase)
+                || processName.Equals("brave", StringComparison.OrdinalIgnoreCase)
+                || processName.Equals("opera", StringComparison.OrdinalIgnoreCase)
+                || processName.Equals("opera_gx", StringComparison.OrdinalIgnoreCase)
+                || processName.Equals("vivaldi", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     private void UpdateShadeRects(PixelRect? selection)
     {
         var width = _captureFrame.Width;
@@ -884,6 +1493,12 @@ public partial class CaptureOverlayWindow : Window
     private const uint LwaAlpha = 0x00000002;
     private const int DwmWindowAttributeExtendedFrameBounds = 9;
     private const int DwmWindowAttributeCloaked = 14;
+    private const int WhKeyboardLowLevel = 13;
+    private const int WmKeyDown = 0x0100;
+    private const int WmSysKeyDown = 0x0104;
+    private const int VirtualKeyEscape = 0x1B;
+
+    private delegate IntPtr LowLevelKeyboardProc(int code, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetTopWindow(IntPtr hWnd);
@@ -910,6 +1525,19 @@ public partial class CaptureOverlayWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetLayeredWindowAttributes(IntPtr hwnd, out uint colorKey, out byte alpha, out uint flags);
 
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWindowsHookEx(int hookType, LowLevelKeyboardProc callback, IntPtr moduleHandle, uint threadId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hookHandle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hookHandle, int code, IntPtr wParam, IntPtr lParam);
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out NativeRect pvAttribute, int cbAttribute);
 
@@ -934,6 +1562,13 @@ public partial class CaptureOverlayWindow : Window
     }
 
     private sealed record LogicalRegionCandidate(PixelRect Bounds, int Priority, long Area, int Depth);
+
+    private sealed record ScrollbarCandidate(int Left, int Right, int Top, int Bottom);
+
+    private sealed record ScrollbarColumnRun(int X, int Top, int Bottom)
+    {
+        public int Height => Bottom - Top;
+    }
 }
 
 public enum CaptureLaunchMode
