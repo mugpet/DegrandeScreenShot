@@ -68,7 +68,7 @@ public sealed class ScreenCaptureService
         }
 
         var previousForegroundWindow = GetForegroundWindow();
-        var previousWindowAbove = GetWindow(windowHandle, GwHwndPrevious);
+        var zOrderState = CaptureWindowZOrderState(windowHandle);
 
         try
         {
@@ -84,7 +84,7 @@ public sealed class ScreenCaptureService
         }
         finally
         {
-            RestoreWindowZOrder(windowHandle, previousWindowAbove);
+            RestoreWindowZOrder(windowHandle, zOrderState);
             if (previousForegroundWindow != IntPtr.Zero && previousForegroundWindow != windowHandle)
             {
                 SetForegroundWindow(previousForegroundWindow);
@@ -105,7 +105,7 @@ public sealed class ScreenCaptureService
         }
 
         var previousForegroundWindow = GetForegroundWindow();
-        var previousWindowAbove = GetWindow(windowHandle, GwHwndPrevious);
+        var zOrderState = CaptureWindowZOrderState(windowHandle);
 
         try
         {
@@ -119,7 +119,7 @@ public sealed class ScreenCaptureService
         }
         finally
         {
-            RestoreWindowZOrder(windowHandle, previousWindowAbove);
+            RestoreWindowZOrder(windowHandle, zOrderState);
             if (previousForegroundWindow != IntPtr.Zero && previousForegroundWindow != windowHandle)
             {
                 SetForegroundWindow(previousForegroundWindow);
@@ -146,6 +146,7 @@ public sealed class ScreenCaptureService
             throw new InvalidOperationException("No window was selected.");
         }
 
+        var zOrderState = CaptureWindowZOrderState(windowHandle);
         RestoreAndActivateWindow(windowHandle);
         var windowBounds = GetWindowBounds(windowHandle);
         EnsureWindowIsVisibleOnDesktop(windowBounds);
@@ -186,7 +187,7 @@ public sealed class ScreenCaptureService
         finally
         {
             RestoreCursor(originalCursor);
-            SetWindowTopMost(windowHandle, false);
+            RestoreWindowZOrder(windowHandle, zOrderState);
         }
     }
 
@@ -929,28 +930,50 @@ public sealed class ScreenCaptureService
         return (keyState & KeyPressedMask) != 0 || (keyState & KeyPressedSinceLastCheckMask) != 0;
     }
 
+    private static WindowZOrderState CaptureWindowZOrderState(IntPtr windowHandle)
+    {
+        return new WindowZOrderState(IsWindowTopMost(windowHandle), GetWindow(windowHandle, GwHwndPrevious));
+    }
+
     private static void SetWindowTopMost(IntPtr windowHandle, bool isTopMost)
     {
         var insertAfter = isTopMost ? HwndTopMost : HwndNoTopMost;
         SetWindowPos(windowHandle, insertAfter, 0, 0, 0, 0, SetWindowPosNoMove | SetWindowPosNoSize | SetWindowPosNoActivate);
     }
 
-    private static void RestoreWindowZOrder(IntPtr windowHandle, IntPtr previousWindowAbove)
+    private static void RestoreWindowZOrder(IntPtr windowHandle, WindowZOrderState zOrderState)
     {
-        if (previousWindowAbove != IntPtr.Zero && IsWindow(previousWindowAbove))
-        {
-            SetWindowPos(windowHandle, previousWindowAbove, 0, 0, 0, 0, SetWindowPosNoMove | SetWindowPosNoSize | SetWindowPosNoActivate);
-            return;
-        }
+        var insertAfter = zOrderState.PreviousWindowAbove != IntPtr.Zero
+            && IsWindow(zOrderState.PreviousWindowAbove)
+            && IsWindowTopMost(zOrderState.PreviousWindowAbove) == zOrderState.WasTopMost
+            ? zOrderState.PreviousWindowAbove
+            : zOrderState.WasTopMost
+                ? HwndTopMost
+                : HwndNoTopMost;
 
-        SetWindowPos(windowHandle, HwndTop, 0, 0, 0, 0, SetWindowPosNoMove | SetWindowPosNoSize | SetWindowPosNoActivate);
+        SetWindowPos(windowHandle, insertAfter, 0, 0, 0, 0, SetWindowPosNoMove | SetWindowPosNoSize | SetWindowPosNoActivate);
     }
+
+    private static bool IsWindowTopMost(IntPtr windowHandle)
+    {
+        return (GetWindowExStyle(windowHandle) & WindowExStyleTopMost) != 0;
+    }
+
+    private static nint GetWindowExStyle(IntPtr windowHandle)
+    {
+        return IntPtr.Size == 8
+            ? GetWindowLongPtr(windowHandle, GwlExStyle)
+            : GetWindowLong(windowHandle, GwlExStyle);
+    }
+
+    private readonly record struct WindowZOrderState(bool WasTopMost, IntPtr PreviousWindowAbove);
 
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeleteObject(IntPtr hObject);
 
     private const int ShowWindowRestore = 9;
+    private const int GwlExStyle = -20;
     private const byte VirtualKeyPageDown = 0x22;
     private const byte VirtualKeyEscape = 0x1B;
     private const byte VirtualKeyHome = 0x24;
@@ -958,7 +981,7 @@ public sealed class ScreenCaptureService
     private const uint KeyEventKeyUp = 0x0002;
     private const uint MouseEventWheel = 0x0800;
     private const uint GwHwndPrevious = 3;
-    private static readonly IntPtr HwndTop = new(0);
+    private const nint WindowExStyleTopMost = 0x00000008;
     private static readonly IntPtr HwndTopMost = new(-1);
     private static readonly IntPtr HwndNoTopMost = new(-2);
     private const uint SetWindowPosNoSize = 0x0001;
@@ -977,6 +1000,12 @@ public sealed class ScreenCaptureService
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern nint GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
