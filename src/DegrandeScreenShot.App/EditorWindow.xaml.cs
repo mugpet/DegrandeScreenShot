@@ -1527,7 +1527,7 @@ public partial class EditorWindow : Window
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
         var bitmap = RenderComposite();
-        System.Windows.Clipboard.SetImage(bitmap);
+        ClipboardHelper.SetImage(bitmap);
         ShowPreview(bitmap);
     }
 
@@ -2610,7 +2610,7 @@ public partial class EditorWindow : Window
         RefreshCanvas();
     }
 
-    private RenderTargetBitmap RenderComposite()
+    private BitmapSource RenderComposite()
     {
         CommitInlineTextEditing();
         RefreshCanvas();
@@ -2632,7 +2632,31 @@ public partial class EditorWindow : Window
             PixelFormats.Pbgra32);
         renderTarget.Render(ArtworkSurface);
         renderTarget.Freeze();
-        return renderTarget;
+
+        // Preserve the correct DPI scale from _workingImage on the final composite output
+        var targetDpiX = _workingImage.DpiX;
+        var targetDpiY = _workingImage.DpiY;
+        if (Math.Abs(renderTarget.DpiX - targetDpiX) < 0.001 && Math.Abs(renderTarget.DpiY - targetDpiY) < 0.001)
+        {
+            return renderTarget;
+        }
+
+        var pixelFormat = renderTarget.Format;
+        var stride = ((renderTarget.PixelWidth * pixelFormat.BitsPerPixel) + 7) / 8;
+        var pixels = new byte[stride * renderTarget.PixelHeight];
+        renderTarget.CopyPixels(pixels, stride, 0);
+
+        var result = BitmapSource.Create(
+            renderTarget.PixelWidth,
+            renderTarget.PixelHeight,
+            targetDpiX,
+            targetDpiY,
+            pixelFormat,
+            renderTarget.Palette,
+            pixels,
+            stride);
+        result.Freeze();
+        return result;
     }
 
     private void RefreshCanvas()

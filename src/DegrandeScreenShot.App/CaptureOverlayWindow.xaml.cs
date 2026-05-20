@@ -52,6 +52,8 @@ public partial class CaptureOverlayWindow : Window
     private readonly LowLevelKeyboardProc _escapeKeyboardProc;
     private IntPtr _escapeKeyboardHook;
     private bool _isCancelling;
+    private double _dpiScaleX = 1.0;
+    private double _dpiScaleY = 1.0;
 
     public CaptureOverlayWindow(
         CaptureFrame captureFrame,
@@ -88,18 +90,25 @@ public partial class CaptureOverlayWindow : Window
 
     public CaptureTargetSelection? SelectedScrollTarget { get; private set; }
 
-    private void CaptureOverlayWindow_Loaded(object sender, RoutedEventArgs e)
+    protected override void OnSourceInitialized(EventArgs e)
     {
-        Left = _captureFrame.VirtualLeft;
-        Top = _captureFrame.VirtualTop;
-        Width = _captureFrame.Width;
-        Height = _captureFrame.Height;
-        OverlayCanvas.Width = _captureFrame.Width;
-        OverlayCanvas.Height = _captureFrame.Height;
-        Activate();
-        Focus();
-        Keyboard.Focus(this);
-        InstallEscapeKeyboardHook();
+        base.OnSourceInitialized(e);
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        _dpiScaleX = dpi.DpiScaleX;
+        _dpiScaleY = dpi.DpiScaleY;
+
+        Left = _captureFrame.VirtualLeft / _dpiScaleX;
+        Top = _captureFrame.VirtualTop / _dpiScaleY;
+        Width = _captureFrame.Width / _dpiScaleX;
+        Height = _captureFrame.Height / _dpiScaleY;
+        
+        OverlayCanvas.Width = _captureFrame.Width / _dpiScaleX;
+        OverlayCanvas.Height = _captureFrame.Height / _dpiScaleY;
+
+        FrozenDesktopImage.Width = _captureFrame.Width / _dpiScaleX;
+        FrozenDesktopImage.Height = _captureFrame.Height / _dpiScaleY;
+
         ConfigureHintText();
         PositionHintPanel(ToPixelPoint(Mouse.GetPosition(OverlayCanvas)));
         ActionPanel.Visibility = _launchMode == CaptureLaunchMode.ChooseAction ? Visibility.Collapsed : Visibility.Collapsed;
@@ -109,6 +118,14 @@ public partial class CaptureOverlayWindow : Window
         {
             UpdateWindowSelection(ToPixelPoint(Mouse.GetPosition(OverlayCanvas)));
         }
+    }
+
+    private void CaptureOverlayWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        Activate();
+        Focus();
+        Keyboard.Focus(this);
+        InstallEscapeKeyboardHook();
     }
 
     private void CaptureOverlayWindow_Closed(object? sender, EventArgs e)
@@ -378,7 +395,7 @@ public partial class CaptureOverlayWindow : Window
 
         if (action == PostCaptureAction.Copy)
         {
-            System.Windows.Clipboard.SetImage(_capturedSelection);
+            ClipboardHelper.SetImage(_capturedSelection);
         }
 
         var preferredEditorSize = _selectionSession.Selection is { } selection && selection.HasArea
@@ -402,7 +419,7 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        _capturedSelection = Crop(selection);
+        _capturedSelection = ApplyScreenDpi(Crop(selection));
         _capturedSelectionBounds = selection;
     }
 
@@ -412,6 +429,10 @@ public partial class CaptureOverlayWindow : Window
         _capturedSelection = targetSelection.ElementBounds is { } elementBounds
             ? _screenCaptureService.CaptureVisibleWindowRegion(targetSelection.Window.Handle, ToScreenRectangle(elementBounds))
             : _screenCaptureService.CaptureVisibleWindow(targetSelection.Window.Handle);
+        if (_capturedSelection is not null)
+        {
+            _capturedSelection = ApplyScreenDpi(_capturedSelection);
+        }
         _capturedSelectionBounds = targetSelection.Bounds;
 
         if (_launchMode == CaptureLaunchMode.CopyToClipboard)
@@ -511,11 +532,17 @@ public partial class CaptureOverlayWindow : Window
         }
 
         ActionPanel.Visibility = Visibility.Visible;
-        var panelLeft = Math.Min(selection.Value.Right - ActionPanel.Width, _captureFrame.Width - ActionPanel.Width - 24);
+        var logicalRight = selection.Value.Right / _dpiScaleX;
+        var logicalBottom = selection.Value.Bottom / _dpiScaleY;
+        var logicalTop = selection.Value.Top / _dpiScaleY;
+        var logicalWidth = _captureFrame.Width / _dpiScaleX;
+        var logicalHeight = _captureFrame.Height / _dpiScaleY;
+
+        var panelLeft = Math.Min(logicalRight - ActionPanel.Width, logicalWidth - ActionPanel.Width - 24);
         panelLeft = Math.Max(24, panelLeft);
 
-        var desiredTop = selection.Value.Bottom + 16;
-        var panelTop = desiredTop + 120 < _captureFrame.Height ? desiredTop : Math.Max(24, selection.Value.Top - 104);
+        var desiredTop = logicalBottom + 16;
+        var panelTop = desiredTop + 120 < logicalHeight ? desiredTop : Math.Max(24, logicalTop - 104);
 
         Canvas.SetLeft(ActionPanel, panelLeft);
         Canvas.SetTop(ActionPanel, panelTop);
@@ -563,14 +590,25 @@ public partial class CaptureOverlayWindow : Window
         var panelWidth = HintPanel.ActualWidth > 0 ? HintPanel.ActualWidth : HintPanel.DesiredSize.Width;
         var panelHeight = HintPanel.ActualHeight > 0 ? HintPanel.ActualHeight : HintPanel.DesiredSize.Height;
         var monitorBounds = GetMonitorBounds(pointer);
-        var panelLeft = Clamp(monitorBounds.Left + ((monitorBounds.Width - panelWidth) / 2), monitorBounds.Left, monitorBounds.Right - panelWidth);
-        var panelTop = Clamp(monitorBounds.Top + HintPanelTopMargin, monitorBounds.Top, monitorBounds.Bottom - panelHeight);
+        
+        var logicalLeft = monitorBounds.Left / _dpiScaleX;
+        var logicalTopBound = monitorBounds.Top / _dpiScaleY;
+        var logicalRight = monitorBounds.Right / _dpiScaleX;
+        var logicalBottom = monitorBounds.Bottom / _dpiScaleY;
+        var logicalWidth = monitorBounds.Width / _dpiScaleX;
+        var logicalHeight = monitorBounds.Height / _dpiScaleY;
+
+        var panelLeft = Clamp(logicalLeft + ((logicalWidth - panelWidth) / 2), logicalLeft, logicalRight - panelWidth);
+        var panelTop = Clamp(logicalTopBound + HintPanelTopMargin, logicalTopBound, logicalBottom - panelHeight);
         var topPanelBounds = new Rect(panelLeft, panelTop, panelWidth, panelHeight);
         topPanelBounds.Inflate(HintPanelMousePadding, HintPanelMousePadding);
 
-        if (topPanelBounds.Contains(new Point(pointer.X, pointer.Y)))
+        var logicalPointerX = pointer.X / _dpiScaleX;
+        var logicalPointerY = pointer.Y / _dpiScaleY;
+
+        if (topPanelBounds.Contains(new Point(logicalPointerX, logicalPointerY)))
         {
-            panelTop = Clamp(monitorBounds.Top + ((monitorBounds.Height - panelHeight) / 2), monitorBounds.Top, monitorBounds.Bottom - panelHeight);
+            panelTop = Clamp(logicalTopBound + ((logicalHeight - panelHeight) / 2), logicalTopBound, logicalBottom - panelHeight);
         }
 
         Canvas.SetLeft(HintPanel, panelLeft);
@@ -1441,8 +1479,8 @@ public partial class CaptureOverlayWindow : Window
 
     private void UpdateShadeRects(PixelRect? selection)
     {
-        var width = _captureFrame.Width;
-        var height = _captureFrame.Height;
+        var width = _captureFrame.Width / _dpiScaleX;
+        var height = _captureFrame.Height / _dpiScaleY;
         if (selection is null || !selection.Value.HasArea)
         {
             SetRect(TopShade, 0, 0, width, height);
@@ -1455,20 +1493,27 @@ public partial class CaptureOverlayWindow : Window
         }
 
         var rect = selection.Value;
-        SetRect(TopShade, 0, 0, width, rect.Top);
-        SetRect(LeftShade, 0, rect.Top, rect.Left, rect.Height);
-        SetRect(RightShade, rect.Right, rect.Top, width - rect.Right, rect.Height);
-        SetRect(BottomShade, 0, rect.Bottom, width, height - rect.Bottom);
-        SetRect(SelectionBorder, rect.Left, rect.Top, rect.Width, rect.Height);
+        var rectLeft = rect.Left / _dpiScaleX;
+        var rectTop = rect.Top / _dpiScaleY;
+        var rectRight = rect.Right / _dpiScaleX;
+        var rectBottom = rect.Bottom / _dpiScaleY;
+        var rectWidth = rect.Width / _dpiScaleX;
+        var rectHeight = rect.Height / _dpiScaleY;
+
+        SetRect(TopShade, 0, 0, width, rectTop);
+        SetRect(LeftShade, 0, rectTop, rectLeft, rectHeight);
+        SetRect(RightShade, rectRight, rectTop, width - rectRight, rectHeight);
+        SetRect(BottomShade, 0, rectBottom, width, height - rectBottom);
+        SetRect(SelectionBorder, rectLeft, rectTop, rectWidth, rectHeight);
         SelectionInfoText.Text = $"{rect.Width} x {rect.Height}";
         SelectionInfoPanel.Visibility = Visibility.Visible;
         SelectionInfoPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var labelWidth = SelectionInfoPanel.DesiredSize.Width;
         var labelHeight = SelectionInfoPanel.DesiredSize.Height;
-        var labelLeft = Math.Max(24, Math.Min(rect.Left, width - labelWidth - 24));
-        var labelTop = rect.Top >= labelHeight + 24
-            ? rect.Top - labelHeight - 10
-            : Math.Min(height - labelHeight - 24, rect.Bottom + 10);
+        var labelLeft = Math.Max(24, Math.Min(rectLeft, width - labelWidth - 24));
+        var labelTop = rectTop >= labelHeight + 24
+            ? rectTop - labelHeight - 10
+            : Math.Min(height - labelHeight - 24, rectBottom + 10);
         Canvas.SetLeft(SelectionInfoPanel, labelLeft);
         Canvas.SetTop(SelectionInfoPanel, Math.Max(24, labelTop));
         SelectionBorder.Visibility = Visibility.Visible;
@@ -1482,10 +1527,38 @@ public partial class CaptureOverlayWindow : Window
         element.Height = Math.Max(0, height);
     }
 
-    private static PixelPoint ToPixelPoint(Point point)
+    private PixelPoint ToPixelPoint(Point point)
     {
-        return new PixelPoint((int)Math.Round(point.X), (int)Math.Round(point.Y));
+        return new PixelPoint((int)Math.Round(point.X * _dpiScaleX), (int)Math.Round(point.Y * _dpiScaleY));
     }
+
+    private BitmapSource ApplyScreenDpi(BitmapSource bitmapSource)
+    {
+        var targetDpiX = 96.0 * _dpiScaleX;
+        var targetDpiY = 96.0 * _dpiScaleY;
+        if (Math.Abs(bitmapSource.DpiX - targetDpiX) < 0.001 && Math.Abs(bitmapSource.DpiY - targetDpiY) < 0.001)
+        {
+            return bitmapSource;
+        }
+
+        var pixelFormat = bitmapSource.Format;
+        var stride = ((bitmapSource.PixelWidth * pixelFormat.BitsPerPixel) + 7) / 8;
+        var pixels = new byte[stride * bitmapSource.PixelHeight];
+        bitmapSource.CopyPixels(pixels, stride, 0);
+
+        var result = BitmapSource.Create(
+            bitmapSource.PixelWidth,
+            bitmapSource.PixelHeight,
+            targetDpiX,
+            targetDpiY,
+            pixelFormat,
+            bitmapSource.Palette,
+            pixels,
+            stride);
+        result.Freeze();
+        return result;
+    }
+
 
     private const uint GwHwndNext = 2;
     private const int GwlExStyle = -20;

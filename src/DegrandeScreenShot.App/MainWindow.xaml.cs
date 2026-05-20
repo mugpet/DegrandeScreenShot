@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -354,26 +354,9 @@ public partial class MainWindow : Window
     {
         try
         {
-            var originalCursor = GetCursorPosition();
-            var cursorRestored = false;
-
-            void RestoreCursor()
-            {
-                if (cursorRestored)
-                {
-                    return;
-                }
-
-                SetCursorPosition(originalCursor);
-                cursorRestored = true;
-            }
-
-            MoveCursorToPrimaryScreen();
             var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
             var overlay = new CaptureOverlayWindow(captureFrame, launchMode);
-            overlay.ContentRendered += (_, _) => RestoreCursor();
             var result = overlay.ShowDialog();
-            RestoreCursor();
 
             if (overlay.CaptureResult is null)
             {
@@ -397,26 +380,9 @@ public partial class MainWindow : Window
     {
         try
         {
-            var originalCursor = GetCursorPosition();
-            var cursorRestored = false;
-
-            void RestoreCursor()
-            {
-                if (cursorRestored)
-                {
-                    return;
-                }
-
-                SetCursorPosition(originalCursor);
-                cursorRestored = true;
-            }
-
-            MoveCursorToPrimaryScreen();
             var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
             var overlay = new CaptureOverlayWindow(captureFrame, CaptureLaunchMode.OpenEditor, CaptureSelectionMode.ScrollTarget);
-            overlay.ContentRendered += (_, _) => RestoreCursor();
             var result = overlay.ShowDialog();
-            RestoreCursor();
 
             if (result != true || overlay.SelectedScrollTarget is not { } scrollTarget)
             {
@@ -424,6 +390,7 @@ public partial class MainWindow : Window
             }
 
             var image = _screenCaptureService.CaptureScrollingWindow(scrollTarget.Window.Handle, ToScreenRectangle(captureFrame, scrollTarget.Bounds));
+            image = ApplyScreenDpi(image);
             ShowCapturePreview(image);
             OpenEditor(image);
         }
@@ -454,6 +421,35 @@ public partial class MainWindow : Window
         editor.Show();
         editor.Activate();
     }
+
+    private BitmapSource ApplyScreenDpi(BitmapSource bitmapSource)
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var targetDpiX = 96.0 * dpi.DpiScaleX;
+        var targetDpiY = 96.0 * dpi.DpiScaleY;
+        if (Math.Abs(bitmapSource.DpiX - targetDpiX) < 0.001 && Math.Abs(bitmapSource.DpiY - targetDpiY) < 0.001)
+        {
+            return bitmapSource;
+        }
+
+        var pixelFormat = bitmapSource.Format;
+        var stride = ((bitmapSource.PixelWidth * pixelFormat.BitsPerPixel) + 7) / 8;
+        var pixels = new byte[stride * bitmapSource.PixelHeight];
+        bitmapSource.CopyPixels(pixels, stride, 0);
+
+        var result = BitmapSource.Create(
+            bitmapSource.PixelWidth,
+            bitmapSource.PixelHeight,
+            targetDpiX,
+            targetDpiY,
+            pixelFormat,
+            bitmapSource.Palette,
+            pixels,
+            stride);
+        result.Freeze();
+        return result;
+    }
+
 
     private static System.Drawing.Rectangle ToScreenRectangle(CaptureFrame captureFrame, DegrandeScreenShot.Core.PixelRect overlayRect)
     {
