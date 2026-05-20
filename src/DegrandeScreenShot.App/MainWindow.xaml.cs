@@ -501,6 +501,9 @@ public partial class MainWindow : Window
 
     private void ShowLauncher()
     {
+        // Position window early before showing it to prevent visible first-frame layout jumps
+        PositionLikeTaskbarPopup();
+
         if (!IsVisible)
         {
             Show();
@@ -511,7 +514,6 @@ public partial class MainWindow : Window
             WindowState = WindowState.Normal;
         }
 
-        PositionLikeTaskbarPopup();
         Activate();
         Opacity = 1;
         ShowInTaskbar = true;
@@ -915,10 +917,26 @@ public partial class MainWindow : Window
 
     private void PositionLikeTaskbarPopup()
     {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX;
+        var scaleY = dpi.DpiScaleY;
+
         var cursor = GetCursorPosition();
         var activeScreen = FormsScreen.FromPoint(new System.Drawing.Point((int)cursor.X, (int)cursor.Y));
         var screenBounds = activeScreen.Bounds;
         var workArea = activeScreen.WorkingArea;
+
+        // Convert physical dimensions to logical DIUs using monitor-specific DPI
+        double logicalCursorX = cursor.X / scaleX;
+        double logicalCursorY = cursor.Y / scaleY;
+
+        double logicalLeft = workArea.Left / scaleX;
+        double logicalTop = workArea.Top / scaleY;
+        double logicalWidth = workArea.Width / scaleX;
+        double logicalHeight = workArea.Height / scaleY;
+        double logicalRight = workArea.Right / scaleX;
+        double logicalBottom = workArea.Bottom / scaleY;
+
         var popupWidth = ActualWidth > 0 ? ActualWidth : Width;
         var popupHeight = ActualHeight > 0 ? ActualHeight : Height;
         var taskbarEdge = GetTaskbarEdge(screenBounds, workArea);
@@ -927,38 +945,38 @@ public partial class MainWindow : Window
         {
             case TaskbarEdge.Left:
             {
-                Left = workArea.Left + 4;
+                Left = logicalLeft + 4;
                 var targetTop = IsCursorNearTaskbar(cursor, taskbarEdge, workArea)
-                    ? cursor.Y - (popupHeight / 2)
-                    : workArea.Top + ((workArea.Height - popupHeight) / 2);
-                Top = Math.Clamp(targetTop, workArea.Top + 8, workArea.Bottom - popupHeight - 8);
+                    ? logicalCursorY - (popupHeight / 2)
+                    : logicalTop + ((logicalHeight - popupHeight) / 2);
+                Top = Math.Clamp(targetTop, logicalTop + 8, logicalBottom - popupHeight - 8);
                 break;
             }
             case TaskbarEdge.Top:
             {
                 var targetLeft = IsCursorNearTaskbar(cursor, taskbarEdge, workArea)
-                    ? cursor.X - (popupWidth / 2)
-                    : workArea.Left + ((workArea.Width - popupWidth) / 2);
-                Left = Math.Clamp(targetLeft, workArea.Left + 8, workArea.Right - popupWidth - 8);
-                Top = workArea.Top + 4;
+                    ? logicalCursorX - (popupWidth / 2)
+                    : logicalLeft + ((logicalWidth - popupWidth) / 2);
+                Left = Math.Clamp(targetLeft, logicalLeft + 8, logicalRight - popupWidth - 8);
+                Top = logicalTop + 4;
                 break;
             }
             case TaskbarEdge.Right:
             {
-                Left = workArea.Right - popupWidth - 4;
+                Left = logicalRight - popupWidth - 4;
                 var targetTop = IsCursorNearTaskbar(cursor, taskbarEdge, workArea)
-                    ? cursor.Y - (popupHeight / 2)
-                    : workArea.Top + ((workArea.Height - popupHeight) / 2);
-                Top = Math.Clamp(targetTop, workArea.Top + 8, workArea.Bottom - popupHeight - 8);
+                    ? logicalCursorY - (popupHeight / 2)
+                    : logicalTop + ((logicalHeight - popupHeight) / 2);
+                Top = Math.Clamp(targetTop, logicalTop + 8, logicalBottom - popupHeight - 8);
                 break;
             }
             default:
             {
                 var targetLeft = IsCursorNearTaskbar(cursor, taskbarEdge, workArea)
-                    ? cursor.X - (popupWidth / 2)
-                    : workArea.Left + ((workArea.Width - popupWidth) / 2);
-                Left = Math.Clamp(targetLeft, workArea.Left + 8, workArea.Right - popupWidth - 8);
-                Top = workArea.Bottom - popupHeight - 4;
+                    ? logicalCursorX - (popupWidth / 2)
+                    : logicalLeft + ((logicalWidth - popupWidth) / 2);
+                Left = Math.Clamp(targetLeft, logicalLeft + 8, logicalRight - popupWidth - 8);
+                Top = logicalBottom - popupHeight - 4;
                 break;
             }
         }

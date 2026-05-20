@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
@@ -29,10 +30,20 @@ public partial class SnapshotPreviewWindow : Window
         Closed += SnapshotPreviewWindow_Closed;
     }
 
-    public void Position(Rect workArea)
+    public void Position(Rect workAreaPhysical)
     {
-        Left = workArea.Right - Width - 18;
-        Top = workArea.Bottom - Height - 18;
+        // Ensure the Win32 window handle is created so we get the accurate DPI scale for the correct monitor
+        var handle = new WindowInteropHelper(this).EnsureHandle();
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX;
+        var scaleY = dpi.DpiScaleY;
+
+        double logicalRight = workAreaPhysical.Right / scaleX;
+        double logicalBottom = workAreaPhysical.Bottom / scaleY;
+
+        Left = logicalRight - Width - 18;
+        Top = logicalBottom - Height - 18;
     }
 
     private void SnapshotPreviewWindow_Loaded(object sender, RoutedEventArgs e)

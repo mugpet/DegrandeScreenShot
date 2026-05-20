@@ -65,13 +65,20 @@ public partial class CaptureOverlayWindow : Window
         _captureFrame = captureFrame;
         _launchMode = launchMode;
         _selectionMode = selectionMode;
-        Left = captureFrame.VirtualLeft;
-        Top = captureFrame.VirtualTop;
-        Width = captureFrame.Width;
-        Height = captureFrame.Height;
+
+        // Pre-scale coordinates to prevent double-sizing and visual layout flickering on creation
+        var dpi = VisualTreeHelper.GetDpi(this);
+        _dpiScaleX = dpi.DpiScaleX;
+        _dpiScaleY = dpi.DpiScaleY;
+
+        Left = captureFrame.VirtualLeft / _dpiScaleX;
+        Top = captureFrame.VirtualTop / _dpiScaleY;
+        Width = captureFrame.Width / _dpiScaleX;
+        Height = captureFrame.Height / _dpiScaleY;
+
         FrozenDesktopImage.Source = captureFrame.Bitmap;
-        FrozenDesktopImage.Width = captureFrame.Width;
-        FrozenDesktopImage.Height = captureFrame.Height;
+        FrozenDesktopImage.Width = captureFrame.Width / _dpiScaleX;
+        FrozenDesktopImage.Height = captureFrame.Height / _dpiScaleY;
         Canvas.SetLeft(FrozenDesktopImage, 0);
         Canvas.SetTop(FrozenDesktopImage, 0);
 

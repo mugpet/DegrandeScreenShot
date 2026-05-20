@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using DegrandeScreenShot.App.Services;
 using Microsoft.Win32;
@@ -32,9 +33,15 @@ public partial class CaptureTypeSelectorWindow : Window
 
     internal CaptureTypeSelection? SelectedAction { get; private set; }
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        // Position window early before it's rendered to prevent layout jump/flicker
+        PositionOnCurrentMonitor();
+    }
+
     private void CaptureTypeSelectorWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        PositionOnCurrentMonitor();
         Activate();
         Focus();
         Keyboard.Focus(this);
@@ -126,13 +133,35 @@ public partial class CaptureTypeSelectorWindow : Window
 
     private void PositionOnCurrentMonitor()
     {
+        // Ensure the Win32 window handle is created so we get the accurate DPI scale for the correct monitor
+        var handle = new WindowInteropHelper(this).EnsureHandle();
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX;
+        var scaleY = dpi.DpiScaleY;
+
         var screen = FormsScreen.FromPoint(new System.Drawing.Point((int)Math.Round(_anchorScreenPoint.X), (int)Math.Round(_anchorScreenPoint.Y)));
         var workArea = screen.WorkingArea;
-        var popupWidth = ActualWidth > 0 ? ActualWidth : Width;
-        var popupHeight = ActualHeight > 0 ? ActualHeight : Height;
 
-        Left = Math.Clamp(workArea.Left + ((workArea.Width - popupWidth) / 2), workArea.Left + 8, workArea.Right - popupWidth - 8);
-        Top = Math.Clamp(workArea.Bottom - popupHeight - 18, workArea.Top + 8, workArea.Bottom - popupHeight - 8);
+        // Force measure if size is not yet calculated to get correct DesiredSize
+        if (ActualWidth <= 0 || ActualHeight <= 0)
+        {
+            Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        }
+
+        var popupWidth = ActualWidth > 0 ? ActualWidth : DesiredSize.Width;
+        var popupHeight = ActualHeight > 0 ? ActualHeight : DesiredSize.Height;
+
+        // Convert workArea physical bounds to logical DIUs
+        double logicalLeft = workArea.Left / scaleX;
+        double logicalTop = workArea.Top / scaleY;
+        double logicalWidth = workArea.Width / scaleX;
+        double logicalHeight = workArea.Height / scaleY;
+        double logicalRight = workArea.Right / scaleX;
+        double logicalBottom = workArea.Bottom / scaleY;
+
+        Left = Math.Clamp(logicalLeft + ((logicalWidth - popupWidth) / 2), logicalLeft + 8, logicalRight - popupWidth - 8);
+        Top = Math.Clamp(logicalBottom - popupHeight - 18, logicalTop + 8, logicalBottom - popupHeight - 8);
     }
 
     private void ApplyTheme()

@@ -3081,9 +3081,18 @@ public partial class EditorWindow : Window
             return;
         }
 
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX;
+        var scaleY = dpi.DpiScaleY;
+
         var workArea = screen.WorkingArea;
-        Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2);
-        Top = workArea.Top + Math.Max(0, (workArea.Height - Height) / 2);
+        double logicalLeft = workArea.Left / scaleX;
+        double logicalTop = workArea.Top / scaleY;
+        double logicalWidth = workArea.Width / scaleX;
+        double logicalHeight = workArea.Height / scaleY;
+
+        Left = logicalLeft + Math.Max(0, (logicalWidth - Width) / 2);
+        Top = logicalTop + Math.Max(0, (logicalHeight - Height) / 2);
     }
 
     private BitmapSource CreateViewportImage(Rect cropRect)
