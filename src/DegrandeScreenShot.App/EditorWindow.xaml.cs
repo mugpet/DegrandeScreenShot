@@ -99,6 +99,7 @@ public partial class EditorWindow : Window
     private bool _isUpdatingHighlightStrength;
     private bool _isUpdatingObjectShadowStrength;
     private bool _isUpdatingObjectBorderWidth;
+    private bool _isUpdatingObjectScale;
     private bool _hasFittedInitialWindowSize;
     private SnapshotPreviewWindow? _previewWindow;
     private double _zoomLevel = 1.0;
@@ -1202,6 +1203,36 @@ public partial class EditorWindow : Window
         RefreshCanvas();
     }
 
+    private void ObjectScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ObjectScaleValueLabel is null)
+        {
+            return;
+        }
+
+        var scalePercent = Math.Round(e.NewValue * 100);
+        ObjectScaleValueLabel.Text = $"{(int)scalePercent}%";
+        if (_isUpdatingObjectScale || _contextMenuAnnotation is not AnnotationBase annotation)
+        {
+            return;
+        }
+
+        annotation.SetScale(e.NewValue);
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void ResetScaleButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_contextMenuAnnotation is AnnotationBase annotation)
+        {
+            annotation.ResetScale();
+            UpdateObjectScaleControls(annotation);
+            CommitHistoryState();
+            RefreshCanvas();
+        }
+    }
+
     private void ResetAnnotation_Click(object sender, RoutedEventArgs e)
     {
         if (_contextMenuAnnotation is null)
@@ -1219,6 +1250,7 @@ public partial class EditorWindow : Window
 
     private void ResetAnnotationToDefaults(AnnotationBase annotation)
     {
+        annotation.ResetScale();
         switch (annotation)
         {
             case RectangleAnnotation rectangle:
@@ -1612,6 +1644,7 @@ public partial class EditorWindow : Window
         UpdateTextAnnotationControls(annotation as TextAnnotation);
         UpdateObscureAnnotationControls(annotation as ObscureAnnotation);
         UpdateHighlightAnnotationControls(annotation as HighlightAnnotation);
+        UpdateObjectScaleControls(annotation);
     }
 
     private bool _suppressArrowSliderEvents;
@@ -2372,6 +2405,28 @@ public partial class EditorWindow : Window
         ObjectBorderSlider.Value = styleAnnotation.BorderWidth;
         ObjectBorderValueLabel.Text = styleAnnotation.BorderWidth.ToString("0.0", CultureInfo.InvariantCulture);
         _isUpdatingObjectBorderWidth = false;
+    }
+
+    private void UpdateObjectScaleControls(AnnotationBase? annotation)
+    {
+        var shouldShowScale = annotation is not null;
+        ObjectScalePanel.Visibility = shouldShowScale ? Visibility.Visible : Visibility.Collapsed;
+        if (annotation is null)
+        {
+            return;
+        }
+
+        _isUpdatingObjectScale = true;
+        try
+        {
+            var scalePercent = Math.Round(annotation.Scale * 100);
+            ObjectScaleSlider.Value = annotation.Scale;
+            ObjectScaleValueLabel.Text = $"{(int)scalePercent}%";
+        }
+        finally
+        {
+            _isUpdatingObjectScale = false;
+        }
     }
 
     private void UpdateHighlightAnnotationControls(HighlightAnnotation? highlightAnnotation)
@@ -3964,6 +4019,23 @@ internal abstract class AnnotationBase
         }
     }
 
+    public double Scale { get; set; } = 1.0;
+
+    public void SetScale(double newScale)
+    {
+        if (newScale < 0.01) newScale = 0.01;
+        double relativeScale = newScale / Scale;
+        Scale = newScale;
+        ScaleGeometricPoints(relativeScale);
+    }
+
+    public virtual void ResetScale()
+    {
+        SetScale(1.0);
+    }
+
+    protected abstract void ScaleGeometricPoints(double relativeScale);
+
     public abstract void Render(Canvas canvas, bool isSelected, bool isHovered);
 
     public abstract bool HitTest(Point point);
@@ -4293,11 +4365,20 @@ internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotat
         BorderWidth = Math.Clamp(value, 0, 12);
     }
 
+    protected override void ScaleGeometricPoints(double relativeScale)
+    {
+        var center = new Point(Bounds.X + Bounds.Width / 2, Bounds.Y + Bounds.Height / 2);
+        var halfWidth = (Bounds.Width / 2) * relativeScale;
+        var halfHeight = (Bounds.Height / 2) * relativeScale;
+        Bounds = new Rect(center.X - halfWidth, center.Y - halfHeight, halfWidth * 2, halfHeight * 2);
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new RectangleAnnotation
         {
             Bounds = Bounds,
+            Scale = Scale,
         };
         clone.SetColor(StrokeColor);
         clone.SetShadowStrength(ShadowStrength);
@@ -4414,11 +4495,20 @@ internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotatio
         BorderWidth = Math.Clamp(value, 0, 12);
     }
 
+    protected override void ScaleGeometricPoints(double relativeScale)
+    {
+        var center = new Point(Bounds.X + Bounds.Width / 2, Bounds.Y + Bounds.Height / 2);
+        var halfWidth = (Bounds.Width / 2) * relativeScale;
+        var halfHeight = (Bounds.Height / 2) * relativeScale;
+        Bounds = new Rect(center.X - halfWidth, center.Y - halfHeight, halfWidth * 2, halfHeight * 2);
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new EllipseAnnotation
         {
             Bounds = Bounds,
+            Scale = Scale,
         };
         clone.SetColor(StrokeColor);
         clone.SetShadowStrength(ShadowStrength);
@@ -4569,12 +4659,25 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
         return MeasureBounds();
     }
 
+    protected override void ScaleGeometricPoints(double relativeScale)
+    {
+        var size = MeasureBounds();
+        var center = new Point(Location.X + size.Width / 2, Location.Y + size.Height / 2);
+
+        SetBoxWidth(BoxWidth * relativeScale);
+        SetFontSize(FontSize * relativeScale);
+
+        var newSize = MeasureBounds();
+        Location = new Point(center.X - newSize.Width / 2, center.Y - newSize.Height / 2);
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new TextAnnotation
         {
             Location = Location,
             Text = Text,
+            Scale = Scale,
         };
         clone.SetColor(TextColor);
         clone.SetBoxWidth(BoxWidth);
@@ -4893,11 +4996,20 @@ internal sealed class ObscureAnnotation : AnnotationBase, IBorderShadowAnnotatio
         BorderWidth = Math.Clamp(value, 0, 12);
     }
 
+    protected override void ScaleGeometricPoints(double relativeScale)
+    {
+        var center = new Point(Bounds.X + Bounds.Width / 2, Bounds.Y + Bounds.Height / 2);
+        var halfWidth = (Bounds.Width / 2) * relativeScale;
+        var halfHeight = (Bounds.Height / 2) * relativeScale;
+        Bounds = new Rect(center.X - halfWidth, center.Y - halfHeight, halfWidth * 2, halfHeight * 2);
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new ObscureAnnotation
         {
             Bounds = Bounds,
+            Scale = Scale,
         };
         clone.SetColor(OverlayColor);
         clone.SetBlurLevel(BlurLevel);
@@ -5485,6 +5597,43 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
         BorderWidth = Math.Clamp(value, 0, 12);
     }
 
+    protected override void ScaleGeometricPoints(double relativeScale)
+    {
+        if (Mode == HighlightMode.Region)
+        {
+            var center = new Point(Bounds.X + Bounds.Width / 2, Bounds.Y + Bounds.Height / 2);
+            var halfWidth = (Bounds.Width / 2) * relativeScale;
+            var halfHeight = (Bounds.Height / 2) * relativeScale;
+            Bounds = new Rect(center.X - halfWidth, center.Y - halfHeight, halfWidth * 2, halfHeight * 2);
+        }
+        else if (Points.Count > 0)
+        {
+            double minX = double.MaxValue;
+            double maxX = double.MinValue;
+            double minY = double.MaxValue;
+            double maxY = double.MinValue;
+
+            foreach (var pt in Points)
+            {
+                if (pt.X < minX) minX = pt.X;
+                if (pt.X > maxX) maxX = pt.X;
+                if (pt.Y < minY) minY = pt.Y;
+                if (pt.Y > maxY) maxY = pt.Y;
+            }
+
+            var center = new Point(minX + (maxX - minX) / 2, minY + (maxY - minY) / 2);
+
+            for (int i = 0; i < Points.Count; i++)
+            {
+                var pt = Points[i];
+                Points[i] = new Point(
+                    center.X + (pt.X - center.X) * relativeScale,
+                    center.Y + (pt.Y - center.Y) * relativeScale
+                );
+            }
+        }
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new HighlightAnnotation
@@ -5493,6 +5642,7 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
             Bounds = Bounds,
             HighlightColor = HighlightColor,
             ColorStrength = ColorStrength,
+            Scale = Scale,
         };
         clone.Points.AddRange(Points);
         clone.SetShadowStrength(ShadowStrength);
@@ -5931,6 +6081,45 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
         Style = arrowStyle;
     }
 
+    protected override void ScaleGeometricPoints(double relativeScale)
+    {
+        var allPoints = new List<Point> { Start, End };
+        allPoints.AddRange(BendPoints);
+
+        double minX = double.MaxValue;
+        double maxX = double.MinValue;
+        double minY = double.MaxValue;
+        double maxY = double.MinValue;
+
+        foreach (var pt in allPoints)
+        {
+            if (pt.X < minX) minX = pt.X;
+            if (pt.X > maxX) maxX = pt.X;
+            if (pt.Y < minY) minY = pt.Y;
+            if (pt.Y > maxY) maxY = pt.Y;
+        }
+
+        var center = new Point(minX + (maxX - minX) / 2, minY + (maxY - minY) / 2);
+
+        Start = new Point(
+            center.X + (Start.X - center.X) * relativeScale,
+            center.Y + (Start.Y - center.Y) * relativeScale
+        );
+        End = new Point(
+            center.X + (End.X - center.X) * relativeScale,
+            center.Y + (End.Y - center.Y) * relativeScale
+        );
+
+        for (int i = 0; i < BendPoints.Count; i++)
+        {
+            var pt = BendPoints[i];
+            BendPoints[i] = new Point(
+                center.X + (pt.X - center.X) * relativeScale,
+                center.Y + (pt.Y - center.Y) * relativeScale
+            );
+        }
+    }
+
     public override AnnotationBase Clone()
     {
         var clone = new ArrowAnnotation
@@ -5955,6 +6144,7 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
             BorderWidth = BorderWidth,
             HasStartHead = HasStartHead,
             HasEndHead = HasEndHead,
+            Scale = Scale,
         };
         clone.BendPoints.AddRange(BendPoints);
         clone.SetColor(StrokeColor);
