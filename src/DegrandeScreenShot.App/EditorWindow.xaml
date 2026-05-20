@@ -811,6 +811,24 @@
                                     <Border Width="20" Height="20" Background="#111827" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                             </StackPanel>
+                            <StackPanel x:Name="ObjectScalePanel" Orientation="Horizontal" Margin="8,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
+                                <Border Width="1" Height="24" Margin="0,0,8,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
+                                <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource IslandMutedTextBrush}" Text="Scale" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                <Slider x:Name="ObjectScaleSlider" Width="90" Minimum="0.1" Maximum="3.0" SmallChange="0.05" LargeChange="0.2" TickFrequency="0.05" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ObjectScaleSlider_ValueChanged" ToolTip="Object scale size" />
+                                <TextBlock x:Name="ObjectScaleValueLabel" Width="36" Margin="2,0,4,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="100%" />
+                                <Button x:Name="ResetScaleButton"
+                                        Width="22"
+                                        Height="22"
+                                        Padding="0"
+                                        Click="ResetScaleButton_Click"
+                                        Background="{DynamicResource SecondaryButtonBrush}"
+                                        Foreground="{DynamicResource IslandTextBrush}"
+                                        BorderBrush="{DynamicResource SecondaryButtonBorderBrush}"
+                                        BorderThickness="1"
+                                        ToolTip="Reset object scale to 100%">
+                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" FontSize="10" Margin="0" Text="&#xE72C;" />
+                                </Button>
+                            </StackPanel>
                             <StackPanel x:Name="ResetActionPanel" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
                                 <Button Width="34"
                                         Height="28"
@@ -1017,24 +1035,7 @@
                                            VerticalAlignment="Center"
                                            Text="15%" />
                                     </StackPanel>
-                            <StackPanel x:Name="ObjectScalePanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
-                                <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
-                                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Scale" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <Slider x:Name="ObjectScaleSlider" Width="120" Minimum="0.1" Maximum="3.0" SmallChange="0.05" LargeChange="0.2" TickFrequency="0.05" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ObjectScaleSlider_ValueChanged" ToolTip="Object scale size" />
-                                <TextBlock x:Name="ObjectScaleValueLabel" Width="42" Margin="4,0,6,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="100%" />
-                                <Button x:Name="ResetScaleButton"
-                                        Width="26"
-                                        Height="22"
-                                        Padding="0"
-                                        Click="ResetScaleButton_Click"
-                                        Background="{DynamicResource SecondaryButtonBrush}"
-                                        Foreground="{DynamicResource IslandTextBrush}"
-                                        BorderBrush="{DynamicResource SecondaryButtonBorderBrush}"
-                                        BorderThickness="1"
-                                        ToolTip="Reset object scale to 100%">
-                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" FontSize="10" Margin="0" Text="&#xE72C;" />
-                                </Button>
-                            </StackPanel>
+
                             <StackPanel x:Name="ObjectStylePanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
                                 <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
                                 <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Shadow" VerticalAlignment="Center" Margin="0,0,6,0" />

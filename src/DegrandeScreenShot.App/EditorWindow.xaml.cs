@@ -6118,6 +6118,12 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
                 center.Y + (pt.Y - center.Y) * relativeScale
             );
         }
+
+        ShaftThickness = Math.Clamp(ShaftThickness * relativeScale, MinShaftThickness, MaxShaftThickness);
+        HeadLength = Math.Clamp(HeadLength * relativeScale, MinHeadLength, MaxHeadLength);
+        HeadWidth = Math.Clamp(HeadWidth * relativeScale, MinHeadWidth, MaxHeadWidth);
+        OuterEdgeWidth = Math.Clamp(OuterEdgeWidth * relativeScale, MinEdgeWidth, MaxEdgeWidth);
+        InnerEdgeWidth = Math.Clamp(InnerEdgeWidth * relativeScale, MinEdgeWidth, MaxEdgeWidth);
     }
 
     public override AnnotationBase Clone()
