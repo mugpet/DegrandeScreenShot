@@ -2617,46 +2617,26 @@ public partial class EditorWindow : Window
         AnnotationCanvas.UpdateLayout();
         ArtworkSurface.UpdateLayout();
 
+        var targetDpiX = _workingImage.DpiX;
+        var targetDpiY = _workingImage.DpiY;
+
         var renderWidth = _appliedCropRect is { } cropRect
-            ? Math.Max(1, (int)Math.Round(NormalizeCropRect(cropRect).Width))
+            ? Math.Max(1, (int)Math.Round(NormalizeCropRect(cropRect).Width * (targetDpiX / 96.0)))
             : _workingImage.PixelWidth;
         var renderHeight = _appliedCropRect is { } activeCropRect
-            ? Math.Max(1, (int)Math.Round(NormalizeCropRect(activeCropRect).Height))
+            ? Math.Max(1, (int)Math.Round(NormalizeCropRect(activeCropRect).Height * (targetDpiY / 96.0)))
             : _workingImage.PixelHeight;
 
         var renderTarget = new RenderTargetBitmap(
             renderWidth,
             renderHeight,
-            96,
-            96,
+            targetDpiX,
+            targetDpiY,
             PixelFormats.Pbgra32);
         renderTarget.Render(ArtworkSurface);
         renderTarget.Freeze();
 
-        // Preserve the correct DPI scale from _workingImage on the final composite output
-        var targetDpiX = _workingImage.DpiX;
-        var targetDpiY = _workingImage.DpiY;
-        if (Math.Abs(renderTarget.DpiX - targetDpiX) < 0.001 && Math.Abs(renderTarget.DpiY - targetDpiY) < 0.001)
-        {
-            return renderTarget;
-        }
-
-        var pixelFormat = renderTarget.Format;
-        var stride = ((renderTarget.PixelWidth * pixelFormat.BitsPerPixel) + 7) / 8;
-        var pixels = new byte[stride * renderTarget.PixelHeight];
-        renderTarget.CopyPixels(pixels, stride, 0);
-
-        var result = BitmapSource.Create(
-            renderTarget.PixelWidth,
-            renderTarget.PixelHeight,
-            targetDpiX,
-            targetDpiY,
-            pixelFormat,
-            renderTarget.Palette,
-            pixels,
-            stride);
-        result.Freeze();
-        return result;
+        return renderTarget;
     }
 
     private void RefreshCanvas()
@@ -2975,21 +2955,21 @@ public partial class EditorWindow : Window
             ArtworkSurface.Height = normalized.Height;
             BaseImage.RenderTransform = Transform.Identity;
             AnnotationCanvas.RenderTransform = new TranslateTransform(-normalized.X, -normalized.Y);
-            UpdateImageDimensions(normalized.Width, normalized.Height);
+            UpdateImageDimensions(normalized.Width * (_workingImage.DpiX / 96.0), normalized.Height * (_workingImage.DpiY / 96.0));
             ApplyZoomTransform();
             QueueCenterArtworkInViewport();
             return;
         }
 
         BaseImage.Source = _workingImage;
-        BaseImage.Width = _workingImage.PixelWidth;
-        BaseImage.Height = _workingImage.PixelHeight;
-        AnnotationCanvas.Width = _workingImage.PixelWidth;
-        AnnotationCanvas.Height = _workingImage.PixelHeight;
-        ArtworkZoomHost.Width = _workingImage.PixelWidth;
-        ArtworkZoomHost.Height = _workingImage.PixelHeight;
-        ArtworkSurface.Width = _workingImage.PixelWidth;
-        ArtworkSurface.Height = _workingImage.PixelHeight;
+        BaseImage.Width = _workingImage.Width;
+        BaseImage.Height = _workingImage.Height;
+        AnnotationCanvas.Width = _workingImage.Width;
+        AnnotationCanvas.Height = _workingImage.Height;
+        ArtworkZoomHost.Width = _workingImage.Width;
+        ArtworkZoomHost.Height = _workingImage.Height;
+        ArtworkSurface.Width = _workingImage.Width;
+        ArtworkSurface.Height = _workingImage.Height;
         BaseImage.RenderTransform = Transform.Identity;
         AnnotationCanvas.RenderTransform = Transform.Identity;
         UpdateImageDimensions(_workingImage.PixelWidth, _workingImage.PixelHeight);
@@ -3108,13 +3088,15 @@ public partial class EditorWindow : Window
 
     private BitmapSource CreateViewportImage(Rect cropRect)
     {
+        var scaleX = _workingImage.DpiX / 96.0;
+        var scaleY = _workingImage.DpiY / 96.0;
         var croppedBitmap = new CroppedBitmap(
             _workingImage,
             new Int32Rect(
-                (int)Math.Round(cropRect.X),
-                (int)Math.Round(cropRect.Y),
-                Math.Max(1, (int)Math.Round(cropRect.Width)),
-                Math.Max(1, (int)Math.Round(cropRect.Height))));
+                (int)Math.Round(cropRect.X * scaleX),
+                (int)Math.Round(cropRect.Y * scaleY),
+                Math.Max(1, (int)Math.Round(cropRect.Width * scaleX)),
+                Math.Max(1, (int)Math.Round(cropRect.Height * scaleY))));
         croppedBitmap.Freeze();
         return croppedBitmap;
     }
@@ -3497,10 +3479,10 @@ public partial class EditorWindow : Window
     private Rect ClampCropRect(Rect rect)
     {
         var normalized = NormalizeCropRect(rect);
-        var left = Math.Clamp(normalized.Left, 0, _workingImage.PixelWidth - 1);
-        var top = Math.Clamp(normalized.Top, 0, _workingImage.PixelHeight - 1);
-        var right = Math.Clamp(normalized.Right, left + 1, _workingImage.PixelWidth);
-        var bottom = Math.Clamp(normalized.Bottom, top + 1, _workingImage.PixelHeight);
+        var left = Math.Clamp(normalized.Left, 0, _workingImage.Width - 1);
+        var top = Math.Clamp(normalized.Top, 0, _workingImage.Height - 1);
+        var right = Math.Clamp(normalized.Right, left + 1, _workingImage.Width);
+        var bottom = Math.Clamp(normalized.Bottom, top + 1, _workingImage.Height);
         return new Rect(new Point(left, top), new Point(right, bottom));
     }
 
@@ -3514,7 +3496,7 @@ public partial class EditorWindow : Window
 
     private void ClampObscureAnnotationToCanvas(ObscureAnnotation obscureAnnotation, bool preserveSize)
     {
-        var canvasBounds = new Rect(0, 0, _workingImage.PixelWidth, _workingImage.PixelHeight);
+        var canvasBounds = new Rect(0, 0, _workingImage.Width, _workingImage.Height);
         var normalized = new Rect(obscureAnnotation.Bounds.TopLeft, obscureAnnotation.Bounds.BottomRight);
 
         if (preserveSize)
@@ -5235,17 +5217,20 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
 
     private Image? CreateBlendedHighlightImage(BitmapSource background, Geometry geometry, bool isHovered)
     {
-        var imageBounds = new Rect(0, 0, background.PixelWidth, background.PixelHeight);
+        var scaleX = background.DpiX / 96.0;
+        var scaleY = background.DpiY / 96.0;
+
+        var imageBounds = new Rect(0, 0, background.Width, background.Height);
         var highlightBounds = Rect.Intersect(geometry.Bounds, imageBounds);
-        if (highlightBounds.IsEmpty || highlightBounds.Width < 1 || highlightBounds.Height < 1)
+        if (highlightBounds.IsEmpty || highlightBounds.Width < 0.5 || highlightBounds.Height < 0.5)
         {
             return null;
         }
 
-        var left = Math.Clamp((int)Math.Floor(highlightBounds.Left), 0, Math.Max(0, background.PixelWidth - 1));
-        var top = Math.Clamp((int)Math.Floor(highlightBounds.Top), 0, Math.Max(0, background.PixelHeight - 1));
-        var right = Math.Clamp((int)Math.Ceiling(highlightBounds.Right), left + 1, background.PixelWidth);
-        var bottom = Math.Clamp((int)Math.Ceiling(highlightBounds.Bottom), top + 1, background.PixelHeight);
+        var left = Math.Clamp((int)Math.Floor(highlightBounds.Left * scaleX), 0, Math.Max(0, background.PixelWidth - 1));
+        var top = Math.Clamp((int)Math.Floor(highlightBounds.Top * scaleY), 0, Math.Max(0, background.PixelHeight - 1));
+        var right = Math.Clamp((int)Math.Ceiling(highlightBounds.Right * scaleX), left + 1, background.PixelWidth);
+        var bottom = Math.Clamp((int)Math.Ceiling(highlightBounds.Bottom * scaleY), top + 1, background.PixelHeight);
         var width = right - left;
         var height = bottom - top;
         if (width <= 0 || height <= 0)
@@ -5254,7 +5239,7 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
         }
 
         var sourcePixels = CopyBackgroundPixels(background, new Int32Rect(left, top, width, height));
-        var maskPixels = CreateGeometryMaskPixels(geometry, left, top, width, height);
+        var maskPixels = CreateGeometryMaskPixels(geometry, left, top, width, height, background.DpiX, background.DpiY);
         var blendedPixels = new byte[sourcePixels.Length];
         var blendStrength = GetBlendStrength(isHovered);
 
@@ -5280,7 +5265,7 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
         }
 
         var stride = width * 4;
-        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, blendedPixels, stride);
+        var bitmap = BitmapSource.Create(width, height, background.DpiX, background.DpiY, PixelFormats.Bgra32, null, blendedPixels, stride);
         if (bitmap.CanFreeze)
         {
             bitmap.Freeze();
@@ -5289,13 +5274,13 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
         var image = new Image
         {
             Source = bitmap,
-            Width = width,
-            Height = height,
+            Width = width / scaleX,
+            Height = height / scaleY,
             Stretch = Stretch.None,
             IsHitTestVisible = false,
         };
-        Canvas.SetLeft(image, left);
-        Canvas.SetTop(image, top);
+        Canvas.SetLeft(image, left / scaleX);
+        Canvas.SetTop(image, top / scaleY);
         return image;
     }
 
@@ -5310,17 +5295,20 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
         return pixels;
     }
 
-    private static byte[] CreateGeometryMaskPixels(Geometry geometry, int left, int top, int width, int height)
+    private static byte[] CreateGeometryMaskPixels(Geometry geometry, int left, int top, int width, int height, double dpiX, double dpiY)
     {
+        var scaleX = dpiX / 96.0;
+        var scaleY = dpiY / 96.0;
+
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
-            context.PushTransform(new TranslateTransform(-left, -top));
+            context.PushTransform(new TranslateTransform(-left / scaleX, -top / scaleY));
             context.DrawGeometry(Brushes.White, null, geometry);
             context.Pop();
         }
 
-        var mask = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        var mask = new RenderTargetBitmap(width, height, dpiX, dpiY, PixelFormats.Pbgra32);
         mask.Render(visual);
         var stride = width * 4;
         var pixels = new byte[stride * height];
