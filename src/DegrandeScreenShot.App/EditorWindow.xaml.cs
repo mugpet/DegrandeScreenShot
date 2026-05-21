@@ -3231,11 +3231,14 @@ public partial class EditorWindow : Window
             return null;
         }
 
+        var dpiScaleX = sourceBitmap.DpiX / 96.0;
+        var dpiScaleY = sourceBitmap.DpiY / 96.0;
+
         var viewportTopLeft = ToViewportPoint(documentRect.TopLeft);
-        var left = (int)Math.Clamp(Math.Round(viewportTopLeft.X), 0, Math.Max(0, sourceBitmap.PixelWidth - 1));
-        var top = (int)Math.Clamp(Math.Round(viewportTopLeft.Y), 0, Math.Max(0, sourceBitmap.PixelHeight - 1));
-        var width = (int)Math.Clamp(Math.Round(documentRect.Width), 1, sourceBitmap.PixelWidth - left);
-        var height = (int)Math.Clamp(Math.Round(documentRect.Height), 1, sourceBitmap.PixelHeight - top);
+        var left = (int)Math.Clamp(Math.Round(viewportTopLeft.X * dpiScaleX), 0, Math.Max(0, sourceBitmap.PixelWidth - 1));
+        var top = (int)Math.Clamp(Math.Round(viewportTopLeft.Y * dpiScaleY), 0, Math.Max(0, sourceBitmap.PixelHeight - 1));
+        var width = (int)Math.Clamp(Math.Round(documentRect.Width * dpiScaleX), 1, sourceBitmap.PixelWidth - left);
+        var height = (int)Math.Clamp(Math.Round(documentRect.Height * dpiScaleY), 1, sourceBitmap.PixelHeight - top);
         if (width <= 0 || height <= 0)
         {
             return null;
