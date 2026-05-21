@@ -134,7 +134,8 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        PositionLikeTaskbarPopup();
+        // Commented out to prevent double-positioning layout flickers (position is calculated in ShowLauncher before Show)
+        // PositionLikeTaskbarPopup();
 
         if (_startHiddenInTray)
         {
@@ -455,10 +456,11 @@ public partial class MainWindow : Window
 
         try
         {
-            if (wasLauncherVisible)
-            {
-                Hide();
-            }
+            // Keep launcher visible during capture to support taking a screenshot of the launcher itself
+            // if (wasLauncherVisible)
+            // {
+            //     Hide();
+            // }
             if (wasPreviewVisible)
             {
                 _previewWindow?.Hide();
@@ -527,10 +529,11 @@ public partial class MainWindow : Window
 
         try
         {
-            if (wasLauncherVisible)
-            {
-                Hide();
-            }
+            // Keep launcher visible during capture to support taking a screenshot of the launcher itself
+            // if (wasLauncherVisible)
+            // {
+            //     Hide();
+            // }
             if (wasPreviewVisible)
             {
                 _previewWindow?.Hide();
@@ -693,7 +696,7 @@ public partial class MainWindow : Window
     internal void ShowLauncher()
     {
         // Position window early before showing it to prevent visible first-frame layout jumps
-        PositionLikeTaskbarPopup();
+        PositionInCenterOfActiveWindow();
 
         if (!IsVisible)
         {
@@ -851,6 +854,11 @@ public partial class MainWindow : Window
         {
             ShowUpdateWindow(_latestReleaseCached, _installerAssetCached);
         }
+    }
+
+    private void BeginClipboardCaptureFromGrid_Click(object sender, RoutedEventArgs e)
+    {
+        StartCapture(CaptureLaunchMode.CopyToClipboard);
     }
 
     private void BeginEditorCaptureFromGrid_Click(object sender, RoutedEventArgs e)
@@ -1148,6 +1156,72 @@ public partial class MainWindow : Window
         return bitmap;
     }
 
+
+    private void PositionInCenterOfActiveWindow()
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX;
+        var scaleY = dpi.DpiScaleY;
+
+        var popupWidth = Width;
+        var popupHeight = Height;
+
+        IntPtr activeHwnd = GetForegroundWindow();
+        bool hasActiveWindow = false;
+        RECT rect = new RECT();
+
+        var thisHwnd = new WindowInteropHelper(this).Handle;
+
+        if (activeHwnd != IntPtr.Zero && activeHwnd != thisHwnd && GetWindowRect(activeHwnd, out rect))
+        {
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            if (width > 100 && height > 100)
+            {
+                hasActiveWindow = true;
+            }
+        }
+
+        double targetCenterX;
+        double targetCenterY;
+        FormsScreen activeScreen;
+
+        if (hasActiveWindow)
+        {
+            int winCenterX = rect.Left + (rect.Right - rect.Left) / 2;
+            int winCenterY = rect.Top + (rect.Bottom - rect.Top) / 2;
+
+            targetCenterX = winCenterX / scaleX;
+            targetCenterY = winCenterY / scaleY;
+
+            activeScreen = FormsScreen.FromPoint(new System.Drawing.Point(winCenterX, winCenterY));
+        }
+        else
+        {
+            var cursor = GetCursorPosition();
+            activeScreen = FormsScreen.FromPoint(new System.Drawing.Point((int)cursor.X, (int)cursor.Y));
+
+            double logicalCursorX = cursor.X / scaleX;
+            double logicalCursorY = cursor.Y / scaleY;
+            targetCenterX = logicalCursorX;
+            targetCenterY = logicalCursorY;
+        }
+
+        var workArea = activeScreen.WorkingArea;
+        double logicalLeft = workArea.Left / scaleX;
+        double logicalTop = workArea.Top / scaleY;
+        double logicalWidth = workArea.Width / scaleX;
+        double logicalHeight = workArea.Height / scaleY;
+        double logicalRight = workArea.Right / scaleX;
+        double logicalBottom = workArea.Bottom / scaleY;
+
+        double left = targetCenterX - (popupWidth / 2);
+        double top = targetCenterY - (popupHeight / 2);
+
+        Left = Math.Clamp(left, logicalLeft + 12, logicalRight - popupWidth - 12);
+        Top = Math.Clamp(top, logicalTop + 12, logicalBottom - popupHeight - 12);
+    }
+
     private void PositionLikeTaskbarPopup()
     {
         var dpi = VisualTreeHelper.GetDpi(this);
@@ -1268,6 +1342,22 @@ public partial class MainWindow : Window
     {
         public int X;
         public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 
     private enum TaskbarEdge
