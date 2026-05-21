@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private bool _isCaptureTypeSelectorOpen;
     private GitHubRelease? _latestReleaseCached;
     private GitHubAsset? _installerAssetCached;
+    private bool _hasAutoPoppedUpdate;
 
     public MainWindow(bool startHiddenInTray = false)
     {
@@ -163,12 +164,29 @@ public partial class MainWindow : Window
                     _latestReleaseCached = release;
                     _installerAssetCached = asset;
                     ShowUpdateUI(release);
+                    TriggerAutoPopupIfNeeded();
                 }
             }
         }
         catch
         {
             // Fail silently on background check
+        }
+    }
+
+    private void TriggerAutoPopupIfNeeded()
+    {
+        if (!_hasAutoPoppedUpdate && IsVisible && _latestReleaseCached != null && _installerAssetCached != null)
+        {
+            _hasAutoPoppedUpdate = true;
+            Dispatcher.InvokeAsync(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(400); // Let the launcher's entrance slide animation complete smoothly first
+                if (IsVisible && _latestReleaseCached != null && _installerAssetCached != null)
+                {
+                    ShowUpdateWindow(_latestReleaseCached, _installerAssetCached);
+                }
+            });
         }
     }
 
@@ -716,6 +734,8 @@ public partial class MainWindow : Window
         {
             entranceAnimation.Begin(this);
         }
+
+        TriggerAutoPopupIfNeeded();
     }
 
     private void HideToTray()
@@ -839,6 +859,7 @@ public partial class MainWindow : Window
         _latestReleaseCached = release;
         _installerAssetCached = asset;
         ShowUpdateUI(release);
+        TriggerAutoPopupIfNeeded();
     }
 
     private void ShowUpdateUI(GitHubRelease release)

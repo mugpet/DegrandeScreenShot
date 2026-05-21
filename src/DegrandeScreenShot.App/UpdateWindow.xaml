@@ -5,8 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Software Update"
-        Width="430"
-        Height="420"
+        Width="480"
+        Height="480"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         WindowStyle="None"
@@ -14,6 +14,7 @@
         Background="Transparent"
         ShowInTaskbar="False">
     <Window.Resources>
+        <!-- Modern ProgressBar template matching the launcher style -->
         <Style x:Key="ModernProgressBarStyle" TargetType="ProgressBar">
             <Setter Property="Height" Value="10" />
             <Setter Property="Background" Value="{DynamicResource PanelBorderBrush}" />
@@ -32,21 +33,21 @@
     </Window.Resources>
 
     <Grid>
+        <!-- Outer Card Container -->
         <Border Margin="12"
-                Padding="20"
                 Background="{DynamicResource PanelBrush}"
                 BorderBrush="{DynamicResource PanelBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="20">
+                BorderThickness="1.5"
+                CornerRadius="24">
             <Border.Effect>
-                <DropShadowEffect BlurRadius="24" ShadowDepth="6" Color="#20000000" Opacity="0.3" />
+                <DropShadowEffect BlurRadius="28" ShadowDepth="6" Color="#2A000000" Opacity="0.3" />
             </Border.Effect>
             
-            <Grid>
+            <Grid Margin="18">
                 <Grid.RowDefinitions>
-                    <!-- Header with Title and drag surface -->
+                    <!-- Header Banner Card (similar to launcher hero banner) -->
                     <RowDefinition Height="Auto" />
-                    <!-- Version comparison line -->
+                    <!-- Version comparison text -->
                     <RowDefinition Height="Auto" />
                     <!-- Release Notes Panel -->
                     <RowDefinition Height="*" />
@@ -56,67 +57,103 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- Header -->
-                <Grid Grid.Row="0" MouseLeftButtonDown="Header_MouseLeftButtonDown" Background="Transparent">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Text="SOFTWARE UPDATE" />
-                        <TextBlock Margin="0,4,0,0" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Text="Update Available!" />
-                    </StackPanel>
-                    
-                    <Button Grid.Column="1"
-                            Width="28"
-                            Height="28"
-                            VerticalAlignment="Top"
-                            Click="CloseButton_Click"
-                            Background="Transparent"
-                            BorderBrush="Transparent"
-                            Foreground="{DynamicResource MutedTextBrush}"
-                            Cursor="Hand"
-                            Content="✕"
-                            FontSize="14"
-                            FontWeight="Bold" />
-                </Grid>
+                <!-- 1. Header Banner -->
+                <Border Grid.Row="0"
+                        Padding="18"
+                        Background="{DynamicResource HeroBrush}"
+                        CornerRadius="18"
+                        MouseLeftButtonDown="Header_MouseLeftButtonDown">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        
+                        <StackPanel>
+                            <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource HeroMutedBrush}" Text="SOFTWARE UPDATE" />
+                            <TextBlock Margin="0,4,0,0" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource HeroTextBrush}" Text="Update Available!" />
+                        </StackPanel>
+                        
+                        <!-- Translucent Circular Close button -->
+                        <Button Grid.Column="1"
+                                Width="30"
+                                Height="30"
+                                VerticalAlignment="Top"
+                                HorizontalAlignment="Right"
+                                Click="CloseButton_Click"
+                                Cursor="Hand"
+                                Background="{DynamicResource CloseButtonBrush}"
+                                BorderBrush="{DynamicResource CloseButtonBorderBrush}"
+                                BorderThickness="1.2"
+                                Foreground="White"
+                                Content="✕"
+                                FontSize="12"
+                                FontWeight="Bold">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="15">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#33FFFFFF"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </Grid>
+                </Border>
 
-                <!-- Version Info -->
+                <!-- 2. Version Info -->
                 <TextBlock Grid.Row="1"
                            x:Name="VersionInfoTextBlock"
-                           Margin="0,12,0,0"
-                           FontSize="14"
+                           Margin="4,14,4,0"
+                           FontSize="13.5"
+                           FontWeight="SemiBold"
                            Foreground="{DynamicResource TextBrush}"
                            TextWrapping="Wrap"
-                           Text="A new version of Degrande ScreenShot is available." />
+                           Text="Version 0.0.0 is now available (you have 0.0.0)." />
 
-                <!-- Release Notes TextBox -->
+                <!-- 3. Release Notes Rich Text Viewer -->
                 <Border Grid.Row="2"
-                        Margin="0,14,0,0"
+                        Margin="0,12,0,0"
                         Background="{DynamicResource AppBackgroundBrush}"
                         BorderBrush="{DynamicResource PanelBorderBrush}"
                         BorderThickness="1"
-                        CornerRadius="12"
-                        Padding="4">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                        <TextBox x:Name="ReleaseNotesTextBox"
-                                 Background="Transparent"
-                                 BorderThickness="0"
-                                 Foreground="{DynamicResource TextBrush}"
-                                 TextWrapping="Wrap"
-                                 AcceptsReturn="True"
-                                 IsReadOnly="True"
-                                 FontSize="13"
-                                 Padding="8"
-                                 FontFamily="Segoe UI, Consolas" />
-                    </ScrollViewer>
+                        CornerRadius="16"
+                        Padding="12,10">
+                    <FlowDocumentScrollViewer x:Name="ReleaseNotesViewer"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              Background="Transparent"
+                                              BorderThickness="0"
+                                              Margin="0"
+                                              Padding="0"
+                                              Focusable="False">
+                        <FlowDocument Background="Transparent"
+                                      FontFamily="Segoe UI Variable Text, Segoe UI, Roboto"
+                                      FontSize="13"
+                                      Foreground="{DynamicResource TextBrush}">
+                            <Paragraph>
+                                <Run Text="Loading release details..." />
+                            </Paragraph>
+                        </FlowDocument>
+                    </FlowDocumentScrollViewer>
                 </Border>
 
-                <!-- Download Progress Area -->
-                <StackPanel Grid.Row="3" x:Name="ProgressArea" Margin="0,14,0,0" Visibility="Collapsed">
+                <!-- 4. Download Progress Area -->
+                <StackPanel Grid.Row="3" x:Name="ProgressArea" Margin="4,12,4,0" Visibility="Collapsed">
                     <Grid>
-                        <TextBlock x:Name="StatusTextBlock" FontSize="13" Foreground="{DynamicResource TextBrush}" Text="Downloading..." />
-                        <TextBlock x:Name="PercentageTextBlock" HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Text="0%" />
+                        <TextBlock x:Name="StatusTextBlock" FontSize="12.5" Foreground="{DynamicResource TextBrush}" Text="Downloading..." />
+                        <TextBlock x:Name="PercentageTextBlock" HorizontalAlignment="Right" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Text="0%" />
                     </Grid>
                     <ProgressBar x:Name="DownloadProgressBar"
                                  Margin="0,6,0,0"
@@ -125,8 +162,8 @@
                                  Style="{DynamicResource ModernProgressBarStyle}" />
                 </StackPanel>
 
-                <!-- Actions Footer -->
-                <Grid Grid.Row="4" Margin="0,16,0,0">
+                <!-- 5. Actions Footer -->
+                <Grid Grid.Row="4" Margin="0,14,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
@@ -134,21 +171,17 @@
                     
                     <Button x:Name="LaterButton"
                             Grid.Column="0"
-                            Margin="0,0,8,0"
+                            Margin="0,0,6,0"
+                            Height="38"
                             Click="CloseButton_Click"
-                            Background="Transparent"
-                            BorderBrush="{DynamicResource PanelBorderBrush}"
-                            Foreground="{DynamicResource TextBrush}"
                             Style="{StaticResource SecondaryButtonStyle}"
                             Content="Later" />
                     
                     <Button x:Name="UpdateNowButton"
                             Grid.Column="1"
-                            Margin="8,0,0,0"
+                            Margin="6,0,0,0"
+                            Height="38"
                             Click="UpdateNowButton_Click"
-                            Background="{DynamicResource AccentBrush}"
-                            BorderBrush="{DynamicResource AccentBrush}"
-                            Foreground="White"
                             Style="{StaticResource PrimaryButtonStyle}"
                             Content="Update Now" />
                 </Grid>
