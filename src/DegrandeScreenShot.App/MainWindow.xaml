@@ -162,6 +162,39 @@
             <Setter Property="Foreground" Value="{DynamicResource LauncherShortcutTextBrush}" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+
+        <!-- Premium Secondary Button for Launcher (Theme-Aware) -->
+        <Style x:Key="LauncherSecondaryButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource LauncherTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LauncherPanelBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1.2" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource LauncherSubtleCardBrush}" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.8" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     
     <Grid Background="Transparent">
@@ -464,11 +497,11 @@
 
                 <!-- 5. Demo Editor Sandbox Card (Simple Button Link) -->
                 <Border Grid.Row="4" Margin="0,0,0,12">
-                    <Button Padding="10,8" Height="36" Background="Transparent" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" Style="{StaticResource SecondaryButtonStyle}" Click="OpenEditorDemo_Click">
+                    <Button Height="36" Style="{StaticResource LauncherSecondaryButtonStyle}" Click="OpenEditorDemo_Click">
                         <StackPanel Orientation="Horizontal">
                             <Path Data="M 12,2 C 6.5,2 2,6.5 2,12 C 2,17.5 6.5,22 12,22 C 17.5,22 22,17.5 22,12 C 22,6.5 17.5,2 12,2 Z M 15.3,16.7 L 11,14 L 11,7 L 13,7 L 13,12.8 L 16.7,15.1 Z" 
                                   Fill="{DynamicResource LauncherTextBrush}" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" Stretch="Uniform"/>
-                            <TextBlock FontSize="12" FontWeight="SemiBold" Text="Launch Sandbox Demo Editor" VerticalAlignment="Center"/>
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LauncherTextBrush}" Text="Launch Sandbox Demo Editor" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
                 </Border>

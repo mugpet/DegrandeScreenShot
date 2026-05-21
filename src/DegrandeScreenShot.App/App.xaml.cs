@@ -27,10 +27,31 @@ public partial class App : System.Windows.Application
 			arg.Equals("--startup", StringComparison.OrdinalIgnoreCase) ||
 			arg.Equals("-s", StringComparison.OrdinalIgnoreCase));
 
+		// First-run detection: launcher is only shown the first time the app runs, otherwise it starts silently in tray.
+		bool isFirstRun = false;
+		try
+		{
+			using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\DegrandeScreenShot");
+			if (key != null)
+			{
+				var value = key.GetValue("HasRunBefore");
+				if (value is null)
+				{
+					isFirstRun = true;
+					key.SetValue("HasRunBefore", 1, Microsoft.Win32.RegistryValueKind.DWord);
+				}
+			}
+		}
+		catch
+		{
+			// Safe default if registry is completely inaccessible
+			isFirstRun = true;
+		}
+
 		var mainWindow = new MainWindow();
 		MainWindow = mainWindow;
 
-		if (isSilent)
+		if (isSilent || !isFirstRun)
 		{
 			mainWindow.InitializeHiddenTrayMode();
 		}
