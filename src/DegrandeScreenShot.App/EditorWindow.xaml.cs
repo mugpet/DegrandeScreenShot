@@ -148,6 +148,8 @@ public partial class EditorWindow : Window
         _workingImage = baseImage;
         Loaded += EditorWindow_Loaded;
         SourceInitialized += EditorWindow_SourceInitialized;
+        LocationChanged += EditorWindow_LocationChanged;
+        DpiChanged += EditorWindow_DpiChanged;
         Closed += EditorWindow_Closed;
         PreviewMouseDown += EditorWindow_PreviewMouseDown;
         SystemEvents.UserPreferenceChanged += SystemEvents_UserPreferenceChanged;
@@ -201,6 +203,38 @@ public partial class EditorWindow : Window
     private void EditorWindow_SourceInitialized(object? sender, EventArgs e)
     {
         ApplyNativeTitleBarTheme();
+        UpdateMaxWindowSize();
+    }
+
+    private void UpdateMaxWindowSize()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        var screen = handle != IntPtr.Zero ? FormsScreen.FromHandle(handle) : FormsScreen.PrimaryScreen;
+        if (screen is null)
+        {
+            return;
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scaleX = dpi.DpiScaleX;
+        var scaleY = dpi.DpiScaleY;
+
+        var workArea = screen.WorkingArea;
+        double logicalWidth = workArea.Width / scaleX;
+        double logicalHeight = workArea.Height / scaleY;
+
+        MaxWidth = logicalWidth;
+        MaxHeight = logicalHeight;
+    }
+
+    private void EditorWindow_LocationChanged(object? sender, EventArgs e)
+    {
+        UpdateMaxWindowSize();
+    }
+
+    private void EditorWindow_DpiChanged(object sender, DpiChangedEventArgs e)
+    {
+        UpdateMaxWindowSize();
     }
 
     private void EditorWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -231,6 +265,8 @@ public partial class EditorWindow : Window
     private void EditorWindow_Closed(object? sender, EventArgs e)
     {
         SystemEvents.UserPreferenceChanged -= SystemEvents_UserPreferenceChanged;
+        LocationChanged -= EditorWindow_LocationChanged;
+        DpiChanged -= EditorWindow_DpiChanged;
     }
 
     private void SystemEvents_UserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
@@ -3079,6 +3115,7 @@ public partial class EditorWindow : Window
             return;
         }
 
+        UpdateMaxWindowSize();
         UpdateLayout();
 
         GrowWindowToFitArtwork();

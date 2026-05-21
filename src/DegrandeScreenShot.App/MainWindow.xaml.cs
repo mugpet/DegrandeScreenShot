@@ -350,17 +350,48 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(StartScrollingWindowCapture);
     }
 
-    private void StartCapture(CaptureLaunchMode launchMode)
+    private async void StartCapture(CaptureLaunchMode launchMode)
     {
+        bool wasLauncherVisible = IsVisible;
+        bool wasPreviewVisible = _previewWindow != null && _previewWindow.IsVisible;
+
         try
         {
+            if (wasLauncherVisible)
+            {
+                Hide();
+            }
+            if (wasPreviewVisible)
+            {
+                _previewWindow?.Hide();
+            }
+
+            // Wait 130ms for the window hide transitions to complete and OS to redraw background
+            await System.Threading.Tasks.Task.Delay(130);
+
             var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
             var overlay = new CaptureOverlayWindow(captureFrame, launchMode);
             var result = overlay.ShowDialog();
 
             if (overlay.CaptureResult is null)
             {
+                // Cancelled, restore previous states
+                if (wasLauncherVisible)
+                {
+                    ShowLauncher();
+                }
+                if (wasPreviewVisible)
+                {
+                    _previewWindow?.Show();
+                }
                 return;
+            }
+
+            // Successful capture! Close the old preview window.
+            if (_previewWindow != null)
+            {
+                _previewWindow.Close();
+                _previewWindow = null;
             }
 
             ShowCapturePreview(overlay.CaptureResult.Image);
@@ -369,24 +400,70 @@ public partial class MainWindow : Window
             {
                 OpenEditor(overlay.CaptureResult.Image);
             }
+            else
+            {
+                if (wasLauncherVisible)
+                {
+                    ShowLauncher();
+                }
+            }
         }
         catch (Exception exception)
         {
+            if (wasLauncherVisible)
+            {
+                ShowLauncher();
+            }
+            if (wasPreviewVisible)
+            {
+                _previewWindow?.Show();
+            }
             System.Windows.MessageBox.Show(this, exception.Message, "Capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    private void StartScrollingWindowCapture()
+    private async void StartScrollingWindowCapture()
     {
+        bool wasLauncherVisible = IsVisible;
+        bool wasPreviewVisible = _previewWindow != null && _previewWindow.IsVisible;
+
         try
         {
+            if (wasLauncherVisible)
+            {
+                Hide();
+            }
+            if (wasPreviewVisible)
+            {
+                _previewWindow?.Hide();
+            }
+
+            // Wait 130ms for the window hide transitions to complete and OS to redraw background
+            await System.Threading.Tasks.Task.Delay(130);
+
             var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
             var overlay = new CaptureOverlayWindow(captureFrame, CaptureLaunchMode.OpenEditor, CaptureSelectionMode.ScrollTarget);
             var result = overlay.ShowDialog();
 
             if (result != true || overlay.SelectedScrollTarget is not { } scrollTarget)
             {
+                // Cancelled, restore previous states
+                if (wasLauncherVisible)
+                {
+                    ShowLauncher();
+                }
+                if (wasPreviewVisible)
+                {
+                    _previewWindow?.Show();
+                }
                 return;
+            }
+
+            // Successful capture! Close the old preview window.
+            if (_previewWindow != null)
+            {
+                _previewWindow.Close();
+                _previewWindow = null;
             }
 
             var image = _screenCaptureService.CaptureScrollingWindow(scrollTarget.Window.Handle, ToScreenRectangle(captureFrame, scrollTarget.Bounds));
@@ -396,9 +473,25 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
+            if (wasLauncherVisible)
+            {
+                ShowLauncher();
+            }
+            if (wasPreviewVisible)
+            {
+                _previewWindow?.Show();
+            }
         }
         catch (Exception exception)
         {
+            if (wasLauncherVisible)
+            {
+                ShowLauncher();
+            }
+            if (wasPreviewVisible)
+            {
+                _previewWindow?.Show();
+            }
             System.Windows.MessageBox.Show(this, exception.Message, "Scrolling capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -585,7 +678,7 @@ public partial class MainWindow : Window
         var showItem = new FormsToolStripMenuItem("Show Launcher");
         showItem.Click += (_, _) => Dispatcher.Invoke(ShowLauncher);
         var captureItem = new FormsToolStripMenuItem("Capture Region");
-        captureItem.Click += (_, _) => Dispatcher.Invoke(StartCapture);
+        captureItem.Click += (_, _) => Dispatcher.Invoke(() => StartCapture(CaptureLaunchMode.OpenEditor));
         var exitItem = new FormsToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => Dispatcher.Invoke(ExitFromTray);
         trayMenu.Items.Add(showItem);
