@@ -1,4 +1,5 @@
-﻿using System.IO;
+using System.IO;
+using System.Linq;
 
 namespace DegrandeScreenShot.App;
 
@@ -20,9 +21,25 @@ public partial class App : System.Windows.Application
 		TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
 		WriteLog("startup");
 
+		// Check for silent/startup command-line flags
+		bool isSilent = e.Args.Any(arg =>
+			arg.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
+			arg.Equals("--startup", StringComparison.OrdinalIgnoreCase) ||
+			arg.Equals("-s", StringComparison.OrdinalIgnoreCase));
+
 		var mainWindow = new MainWindow();
 		MainWindow = mainWindow;
-		mainWindow.InitializeHiddenTrayMode();
+
+		if (isSilent)
+		{
+			mainWindow.InitializeHiddenTrayMode();
+		}
+		else
+		{
+			// Launch the premium splash window
+			var splash = new SplashWindow(mainWindow);
+			splash.Show();
+		}
 	}
 
 	protected override void OnExit(System.Windows.ExitEventArgs e)

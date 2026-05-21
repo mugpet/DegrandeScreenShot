@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -42,6 +43,7 @@ public partial class MainWindow : Window
     public MainWindow(bool startHiddenInTray = false)
     {
         InitializeComponent();
+        AppVersionLabel.Text = $"v{UpdateService.GetCurrentVersion().ToString(3)}";
         _startHiddenInTray = startHiddenInTray;
         ApplyLauncherTheme();
         EnsureStartupPreferenceInitialized();
@@ -159,7 +161,7 @@ public partial class MainWindow : Window
                 {
                     _latestReleaseCached = release;
                     _installerAssetCached = asset;
-                    UpdateBadge.Visibility = Visibility.Visible;
+                    ShowUpdateUI(release);
                 }
             }
         }
@@ -301,7 +303,7 @@ public partial class MainWindow : Window
 
         if (isEnabled)
         {
-            runKey.SetValue(StartupRunValueName, QuoteCommandPath(GetExecutablePath()), RegistryValueKind.String);
+            runKey.SetValue(StartupRunValueName, $"{QuoteCommandPath(GetExecutablePath())} --silent", RegistryValueKind.String);
             return;
         }
 
@@ -369,7 +371,7 @@ public partial class MainWindow : Window
                     {
                         _latestReleaseCached = release;
                         _installerAssetCached = asset;
-                        UpdateBadge.Visibility = Visibility.Visible;
+                        ShowUpdateUI(release);
 
                         CheckForUpdatesButton.Content = originalContent;
                         ShowUpdateWindow(release, asset);
@@ -688,7 +690,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowLauncher()
+    internal void ShowLauncher()
     {
         // Position window early before showing it to prevent visible first-frame layout jumps
         PositionLikeTaskbarPopup();
@@ -704,8 +706,13 @@ public partial class MainWindow : Window
         }
 
         Activate();
-        Opacity = 1;
         ShowInTaskbar = true;
+
+        // Play entrance animation
+        if (Resources["WindowEntranceStoryboard"] is Storyboard entranceAnimation)
+        {
+            entranceAnimation.Begin(this);
+        }
     }
 
     private void HideToTray()
@@ -822,6 +829,43 @@ public partial class MainWindow : Window
     {
         var demoImage = CreateDemoBitmap();
         OpenEditor(demoImage);
+    }
+
+    internal void SetCachedUpdate(GitHubRelease release, GitHubAsset asset)
+    {
+        _latestReleaseCached = release;
+        _installerAssetCached = asset;
+        ShowUpdateUI(release);
+    }
+
+    private void ShowUpdateUI(GitHubRelease release)
+    {
+        UpToDateFooter.Visibility = Visibility.Collapsed;
+        UpdateBanner.Visibility = Visibility.Visible;
+        UpdateBannerVersionText.Text = $"{release.TagName} is ready to install.";
+    }
+
+    private void UpdateBanner_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_latestReleaseCached != null && _installerAssetCached != null)
+        {
+            ShowUpdateWindow(_latestReleaseCached, _installerAssetCached);
+        }
+    }
+
+    private void BeginEditorCaptureFromGrid_Click(object sender, RoutedEventArgs e)
+    {
+        StartCapture(CaptureLaunchMode.OpenEditor);
+    }
+
+    private void BeginScrollingWindowCaptureFromGrid_Click(object sender, RoutedEventArgs e)
+    {
+        StartScrollingWindowCapture();
+    }
+
+    private void BeginClipboardEditorFromGrid_Click(object sender, RoutedEventArgs e)
+    {
+        OpenClipboardInEditor();
     }
 
     private static BitmapSource GetClipboardEditorImage()

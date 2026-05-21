@@ -1,0 +1,166 @@
+<Window x:Class="DegrandeScreenShot.App.SplashWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Degrande ScreenShot"
+        Height="280"
+        Width="460"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False">
+    
+    <Window.Resources>
+        <!-- Modern visual transitions -->
+        <Storyboard x:Key="FadeInStoryboard">
+            <DoubleAnimation Storyboard.TargetName="SplashBorder" 
+                             Storyboard.TargetProperty="Opacity" 
+                             From="0.0" To="1.0" Duration="0:0:0.4">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseOut"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="MainContent" 
+                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" 
+                             From="20" To="0" Duration="0:0:0.45">
+                <DoubleAnimation.EasingFunction>
+                    <CircleEase EasingMode="EaseOut"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+        </Storyboard>
+        
+        <Storyboard x:Key="FadeOutStoryboard">
+            <DoubleAnimation Storyboard.TargetName="SplashBorder" 
+                             Storyboard.TargetProperty="Opacity" 
+                             From="1.0" To="0.0" Duration="0:0:0.3">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseIn"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="MainContent" 
+                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" 
+                             From="0" To="-15" Duration="0:0:0.3">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseIn"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+        </Storyboard>
+    </Window.Resources>
+    
+    <Border x:Name="SplashBorder" 
+            Opacity="0"
+            CornerRadius="24" 
+            BorderThickness="1.5"
+            Margin="10">
+        <!-- Premium Neon-blue glowing border and mesh gradient background -->
+        <Border.BorderBrush>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#FF0C8EC5" Offset="0.0"/>
+                <GradientStop Color="#FFEAF4FA" Offset="0.3"/>
+                <GradientStop Color="#FF00E6FF" Offset="0.6"/>
+                <GradientStop Color="#FF5E4D91" Offset="1.0"/>
+            </LinearGradientBrush>
+        </Border.BorderBrush>
+        
+        <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="0.7,1">
+                <GradientStop Color="#FF11161F" Offset="0.0"/>
+                <GradientStop Color="#FF171E2B" Offset="0.4"/>
+                <GradientStop Color="#FF1F293A" Offset="1.0"/>
+            </LinearGradientBrush>
+        </Border.Background>
+        
+        <Border.Effect>
+            <!-- Sleek, premium ambient glow shadow -->
+            <DropShadowEffect BlurRadius="28" Color="#000000" Opacity="0.65" ShadowDepth="0"/>
+        </Border.Effect>
+        
+        <Grid x:Name="MainContent">
+            <Grid.RenderTransform>
+                <TranslateTransform Y="20"/>
+            </Grid.RenderTransform>
+            
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            
+            <!-- Logo & Brand Column -->
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,15,0,0">
+                <!-- Custom Vector Camera Logo -->
+                <Grid Width="72" Height="72" HorizontalAlignment="Center" Margin="0,0,0,16">
+                    <Grid.Effect>
+                        <DropShadowEffect BlurRadius="16" Color="#FF0C8EC5" Opacity="0.45" ShadowDepth="0"/>
+                    </Grid.Effect>
+                    <!-- Camera Outer Body -->
+                    <Path Data="M 12,22 C 12,20.9 12.9,20 14,20 L 22,20 C 23.1,20 24,20.9 24,22 L 26,22 C 26,19.8 27.8,18 30,18 L 42,18 C 44.2,18 46,19.8 46,22 L 48,22 C 49.1,22 50,22.9 50,24 L 58,24 C 60.2,24 62,25.8 62,28 L 62,56 C 62,58.2 60.2,60 58,60 L 14,60 C 11.8,60 10,58.2 10,56 L 10,28 C 10,25.8 11.8,24 14,24 L 22,24 L 14,24 Z" 
+                          Fill="#FFEAF4FA" 
+                          Stretch="Uniform" />
+                    <!-- Neon Blue Lens Accent -->
+                    <Ellipse Width="30" Height="30" Margin="0,8,0,0" StrokeThickness="3.5" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Ellipse.Stroke>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#FF0C8EC5" Offset="0"/>
+                                <GradientStop Color="#FF00E6FF" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Ellipse.Stroke>
+                    </Ellipse>
+                    <!-- Lens Inner Reflection -->
+                    <Ellipse Width="10" Height="10" Margin="10,0,0,10" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.85"/>
+                    <Path Data="M 52,28 L 56,28 L 56,32 L 52,32 Z" Fill="#FF00E6FF" Margin="0,4,4,0" HorizontalAlignment="Right" VerticalAlignment="Top"/>
+                </Grid>
+                
+                <!-- App Title -->
+                <TextBlock Text="DEGRANDE SCREENSHOT" 
+                           FontFamily="Segoe UI Variable Display, Segoe UI" 
+                           FontWeight="Bold" 
+                           FontSize="24" 
+                           Foreground="White" 
+                           HorizontalAlignment="Center"/>
+                
+                <!-- Status Display -->
+                <TextBlock x:Name="StatusLabel"
+                           Text="Initializing components..." 
+                           FontFamily="Segoe UI Variable Text, Segoe UI" 
+                           FontWeight="Normal" 
+                           FontSize="12" 
+                           Foreground="#8FA0B5" 
+                           Margin="0,8,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+            
+            <!-- Glowing Loader Line -->
+            <Grid Grid.Row="1" Margin="32,0,32,24" Height="3">
+                <Border Background="#1AFFFFFF" CornerRadius="1.5"/>
+                <!-- Indeterminate glowing runner -->
+                <ProgressBar x:Name="SplashProgressBar" 
+                             IsIndeterminate="True" 
+                             BorderThickness="0" 
+                             Background="Transparent"
+                             Height="3">
+                    <ProgressBar.Foreground>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="#000C8EC5" Offset="0.0"/>
+                            <GradientStop Color="#FF0C8EC5" Offset="0.4"/>
+                            <GradientStop Color="#FF00E6FF" Offset="0.5"/>
+                            <GradientStop Color="#FF0C8EC5" Offset="0.6"/>
+                            <GradientStop Color="#000C8EC5" Offset="1.0"/>
+                        </LinearGradientBrush>
+                    </ProgressBar.Foreground>
+                    <ProgressBar.Template>
+                        <ControlTemplate TargetType="ProgressBar">
+                            <Grid x:Name="TemplateRoot">
+                                <Border x:Name="Track" Background="{TemplateBinding Background}" BorderThickness="0" CornerRadius="1.5"/>
+                                <Grid x:Name="IndicatorHorizontal" HorizontalAlignment="Left">
+                                    <Border x:Name="Indicator" Background="{TemplateBinding Foreground}" CornerRadius="1.5"/>
+                                </Grid>
+                            </Grid>
+                        </ControlTemplate>
+                    </ProgressBar.Template>
+                </ProgressBar>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

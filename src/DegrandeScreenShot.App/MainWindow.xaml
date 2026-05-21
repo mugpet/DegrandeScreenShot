@@ -6,309 +6,599 @@
         mc:Ignorable="d"
         Title="Degrande ScreenShot"
         Width="500"
-        Height="720"
+        Height="730"
         MinWidth="500"
-        MinHeight="720"
+        MinHeight="730"
         WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         WindowStyle="None"
-        Background="{DynamicResource LauncherBackgroundBrush}"
-        Foreground="{DynamicResource LauncherTextBrush}"
+        AllowsTransparency="True"
+        Background="Transparent"
         ShowInTaskbar="True">
+    
     <Window.Resources>
-        <SolidColorBrush x:Key="LauncherBackgroundBrush" Color="#F4F7FB" />
-        <SolidColorBrush x:Key="LauncherPanelBrush" Color="#FFFFFF" />
-        <SolidColorBrush x:Key="LauncherPanelBorderBrush" Color="#D5E0EA" />
-        <SolidColorBrush x:Key="LauncherHeroBrush" Color="#1D2631" />
-        <SolidColorBrush x:Key="LauncherHeroMutedBrush" Color="#AFC0CE" />
-        <SolidColorBrush x:Key="LauncherHeroTextBrush" Color="#F4F7FB" />
-        <SolidColorBrush x:Key="LauncherCardBrush" Color="#FFFFFF" />
-        <SolidColorBrush x:Key="LauncherSubtleCardBrush" Color="#F0F5F9" />
-        <SolidColorBrush x:Key="LauncherTextBrush" Color="#1D2631" />
-        <SolidColorBrush x:Key="LauncherMutedTextBrush" Color="#6C7987" />
-        <SolidColorBrush x:Key="LauncherShortcutBrush" Color="#EAF4FA" />
-        <SolidColorBrush x:Key="LauncherShortcutTextBrush" Color="#0B6F9A" />
-        <SolidColorBrush x:Key="LauncherShortcutWarmBrush" Color="#FDF3E7" />
-        <SolidColorBrush x:Key="LauncherShortcutWarmTextBrush" Color="#A85B1A" />
-        <SolidColorBrush x:Key="LauncherShortcutPurpleBrush" Color="#EFEAF8" />
-        <SolidColorBrush x:Key="LauncherShortcutPurpleTextBrush" Color="#5E4D91" />
-        <SolidColorBrush x:Key="LauncherCloseButtonBrush" Color="#1FFFFFFF" />
-        <SolidColorBrush x:Key="LauncherCloseButtonBorderBrush" Color="#2FFFFFFF" />
+        <!-- High-fidelity animations -->
+        <Storyboard x:Key="WindowEntranceStoryboard">
+            <DoubleAnimation Storyboard.TargetName="LauncherScale" 
+                             Storyboard.TargetProperty="ScaleX" 
+                             From="0.96" To="1.0" Duration="0:0:0.35">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseOut"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="LauncherScale" 
+                             Storyboard.TargetProperty="ScaleY" 
+                             From="0.96" To="1.0" Duration="0:0:0.35">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseOut"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="LauncherTranslation" 
+                             Storyboard.TargetProperty="Y" 
+                             From="30" To="0" Duration="0:0:0.4">
+                <DoubleAnimation.EasingFunction>
+                    <CircleEase EasingMode="EaseOut"/>
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="MainWindowBorder" 
+                             Storyboard.TargetProperty="Opacity" 
+                             From="0.0" To="1.0" Duration="0:0:0.3"/>
+        </Storyboard>
 
+        <!-- Dynamic iOS-style Toggle Switch template -->
         <Style x:Key="LauncherSwitchStyle" TargetType="ToggleButton">
-            <Setter Property="Width" Value="48" />
-            <Setter Property="Height" Value="26" />
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="24" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{DynamicResource LauncherPanelBorderBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource LauncherPanelBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
                         <Border x:Name="SwitchTrack"
                                 Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="13">
+                                CornerRadius="12"
+                                SnapsToDevicePixels="True">
                             <Grid>
                                 <Ellipse x:Name="SwitchThumb"
-                                         Width="20"
-                                         Height="20"
-                                         Margin="3"
+                                         Width="18"
+                                         Height="18"
+                                         Margin="3,0"
                                          HorizontalAlignment="Left"
-                                         Fill="{DynamicResource LauncherPanelBrush}" />
+                                         VerticalAlignment="Center"
+                                         Fill="White">
+                                    <Ellipse.Effect>
+                                        <DropShadowEffect BlurRadius="4" ShadowDepth="1" Color="#20000000" Opacity="0.3"/>
+                                    </Ellipse.Effect>
+                                </Ellipse>
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="SwitchTrack" Property="Background" Value="{DynamicResource AccentBrush}" />
-                                <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                                 <Setter TargetName="SwitchThumb" Property="HorizontalAlignment" Value="Right" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SwitchTrack" Property="Opacity" Value="0.9" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Premium Custom Action Card style -->
+        <Style x:Key="LauncherActionCardStyle" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource LauncherCardBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LauncherPanelBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1.2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="CardBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="16"
+                                RenderTransformOrigin="0.5,0.5"
+                                SnapsToDevicePixels="True">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="CardScale" ScaleX="1.0" ScaleY="1.0" />
+                            </Border.RenderTransform>
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="MouseOver">
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX" To="1.025" Duration="0:0:0.15"/>
+                                            <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY" To="1.025" Duration="0:0:0.15"/>
+                                        </Storyboard>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX" To="0.98" Duration="0:0:0.08"/>
+                                            <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY" To="0.98" Duration="0:0:0.08"/>
+                                        </Storyboard>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            
+                            <ContentPresenter Content="{TemplateBinding Content}" Margin="{TemplateBinding Padding}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource LauncherSubtleCardBrush}"/>
+                                <Setter TargetName="CardBorder" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect BlurRadius="12" ShadowDepth="3" Color="#150C8EC5" Opacity="0.25"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Realistic Keyboard Keycaps -->
+        <Style x:Key="KeycapStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource LauncherShortcutBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LauncherPanelBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1,1,1,2.5" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+        </Style>
+
+        <Style x:Key="KeycapTextStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas, Segoe UI" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource LauncherShortcutTextBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
     </Window.Resources>
-    <Grid Background="{DynamicResource LauncherBackgroundBrush}">
-        <Border Margin="14"
-                Padding="20"
-                Background="{DynamicResource LauncherPanelBrush}"
+    
+    <Grid Background="Transparent">
+        <Border x:Name="MainWindowBorder" 
+                Opacity="0"
+                Margin="12"
+                CornerRadius="24"
+                Background="{DynamicResource LauncherBackgroundBrush}"
                 BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="24">
+                BorderThickness="1.5">
+            <Border.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="LauncherScale" CenterX="240" CenterY="350"/>
+                    <TranslateTransform x:Name="LauncherTranslation" Y="30"/>
+                </TransformGroup>
+            </Border.RenderTransform>
             <Border.Effect>
-                <DropShadowEffect BlurRadius="32" ShadowDepth="10" Color="#22000000" Opacity="0.28" />
+                <DropShadowEffect BlurRadius="28" ShadowDepth="6" Color="#2A000000" Opacity="0.3" />
             </Border.Effect>
-            <Grid>
+            
+            <Grid Margin="18">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" /> <!-- Header -->
+                    <RowDefinition Height="Auto" /> <!-- Actions Grid Title -->
+                    <RowDefinition Height="Auto" /> <!-- Actions Grid (2x2) -->
+                    <RowDefinition Height="Auto" /> <!-- Settings Toggle Card -->
+                    <RowDefinition Height="*" />    <!-- Scrollable Shortcuts Deck -->
+                    <RowDefinition Height="Auto" /> <!-- Footer/Update Banner -->
                 </Grid.RowDefinitions>
 
-                <Border Padding="18"
-                    MouseLeftButtonDown="DragSurface_MouseLeftButtonDown"
+                <!-- 1. Header Banner -->
+                <Border Grid.Row="0"
+                        Padding="18"
                         Background="{DynamicResource LauncherHeroBrush}"
-                        CornerRadius="20">
+                        CornerRadius="18"
+                        MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
+                        
                         <StackPanel>
-                            <TextBlock FontSize="14" Foreground="{DynamicResource LauncherHeroMutedBrush}" Text="Quick capture" />
-                            <TextBlock Margin="0,8,0,0" FontSize="28" FontWeight="SemiBold" Foreground="{DynamicResource LauncherHeroTextBrush}" Text="Degrande ScreenShot" />
-                            <TextBlock Margin="0,10,0,0"
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LauncherHeroMutedBrush}" Text="SCREENSHOT SUITE" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <TextBlock FontSize="24" FontWeight="Bold" Foreground="{DynamicResource LauncherHeroTextBrush}" Text="Degrande" />
+                                <TextBlock FontSize="24" FontWeight="Light" Foreground="{DynamicResource LauncherHeroTextBrush}" Text="ScreenShot" Margin="4,0,0,0" />
+                            </StackPanel>
+                            <TextBlock Margin="0,6,0,0"
                                        Foreground="{DynamicResource LauncherHeroMutedBrush}"
-                                       FontSize="13"
-                                       Text="A popup-style launcher for region capture, clipboard copy, and editor handoff across all monitors."
+                                       FontSize="12"
+                                       Text="Region capture, scrolling window stitch, and image annotation handoff."
                                        TextWrapping="Wrap" />
                         </StackPanel>
+                        
+                        <!-- Translucent Close button -->
                         <Button Grid.Column="1"
-                                Width="32"
-                                Height="32"
-                                Margin="12,0,0,0"
-                                HorizontalAlignment="Right"
+                                Width="30"
+                                Height="30"
                                 VerticalAlignment="Top"
+                                HorizontalAlignment="Right"
                                 Click="CloseWindow_Click"
+                                Cursor="Hand"
                                 Background="{DynamicResource LauncherCloseButtonBrush}"
                                 BorderBrush="{DynamicResource LauncherCloseButtonBorderBrush}"
-                                BorderThickness="1"
+                                BorderThickness="1.2"
                                 Foreground="White"
-                                Content="X" />
+                                Content="✕"
+                                FontSize="12"
+                                FontWeight="Bold">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="15">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#33FFFFFF"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
                     </Grid>
                 </Border>
 
-                <StackPanel Grid.Row="1" Margin="0,18,0,0" Orientation="Horizontal">
-                    <Button Width="176"
-                            Click="StartCapture_Click"
-                            Background="{DynamicResource AccentBrush}"
-                            BorderBrush="{DynamicResource AccentBrush}"
-                            Style="{StaticResource PrimaryButtonStyle}"
-                        Content="Capture Selector" />
-                    <Button Width="138"
-                            Margin="10,0,0,0"
-                            Click="OpenEditorDemo_Click"
-                            Background="Transparent"
-                            BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
-                            Foreground="{DynamicResource LauncherTextBrush}"
-                            Style="{StaticResource SecondaryButtonStyle}"
-                            Content="Demo Editor" />
-                </StackPanel>
+                <!-- 2. Section Title -->
+                <TextBlock Grid.Row="1" 
+                           Margin="4,18,0,10" 
+                           FontSize="14" 
+                           FontWeight="Bold" 
+                           Foreground="{DynamicResource LauncherTextBrush}" 
+                           Text="Quick Actions" />
 
-                <Border Grid.Row="2"
-                        Margin="0,18,0,0"
-                        Padding="16"
+                <!-- 3. Actions Grid (2x2 Layout) -->
+                <Grid Grid.Row="2" Margin="0,0,0,14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Card 1: Capture Selector (Interactive Master Hub) -->
+                    <Button Grid.Row="0" Grid.Column="0" Margin="0,0,6,6" Height="105"
+                            Style="{StaticResource LauncherActionCardStyle}"
+                            Click="StartCapture_Click">
+                        <StackPanel Margin="-8,-8,0,0">
+                            <!-- Glowing Gradient camera icon vector -->
+                            <Path Data="M 2,6 C 2,4.9 2.9,4 4,4 L 8,4 C 8.6,4 9.1,3.7 9.4,3.2 L 10.6,1.4 C 11,-0.6 12,-1 13.5,-1 L 18.5,-1 C 20,-1 21,-0.6 21.4,1.4 L 22.6,3.2 C 22.9,3.7 23.4,4 24,4 L 28,4 C 29.1,4 30,4.9 30,6 L 30,22 C 30,23.1 29.1,24 28,24 L 4,24 C 2.9,24 2,23.1 2,22 Z M 16,20 C 20.4,20 24,16.4 24,12 C 24,7.6 20.4,4 16,4 C 11.6,4 8,7.6 8,12 C 8,16.4 11.6,20 16,20 Z" 
+                                  Fill="{DynamicResource AccentBrush}" Width="20" Height="16" HorizontalAlignment="Left" Stretch="Uniform"/>
+                            <TextBlock Margin="0,8,0,2" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource LauncherTextBrush}" Text="Capture Hub" />
+                            <TextBlock FontSize="11" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Interactive selector menu" />
+                            <!-- Small Hotkey badge inside card -->
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="⌥" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="⌘" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="4" /></Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- Card 2: Direct Region Capture -->
+                    <Button Grid.Row="0" Grid.Column="1" Margin="6,0,0,6" Height="105"
+                            Style="{StaticResource LauncherActionCardStyle}"
+                            Click="BeginEditorCaptureFromGrid_Click">
+                        <StackPanel Margin="-8,-8,0,0">
+                            <!-- Draw/Crop Icon -->
+                            <Path Data="M 2,2 L 14,2 L 14,4 L 4,4 L 4,14 L 2,14 Z M 18,2 L 30,2 L 30,14 L 28,14 L 28,4 L 18,4 Z M 2,18 L 4,18 L 4,28 L 14,28 L 14,30 L 2,30 Z M 30,18 L 30,30 L 18,30 L 18,28 L 28,28 L 28,18 Z" 
+                                  Fill="{DynamicResource AccentBrush}" Width="16" Height="16" HorizontalAlignment="Left" Stretch="Uniform"/>
+                            <TextBlock Margin="0,8,0,2" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource LauncherTextBrush}" Text="Region Crop" />
+                            <TextBlock FontSize="11" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Draw straight to editor" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="⌥" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="⌘" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="7" /></Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- Card 3: Scrolling Stitch -->
+                    <Button Grid.Row="1" Grid.Column="0" Margin="0,6,6,0" Height="105"
+                            Style="{StaticResource LauncherActionCardStyle}"
+                            Click="BeginScrollingWindowCaptureFromGrid_Click">
+                        <StackPanel Margin="-8,-8,0,0">
+                            <!-- Scroll Icon -->
+                            <Path Data="M 4,2 C 2.9,2 2,2.9 2,4 L 2,28 C 2,29.1 2.9,30 4,30 L 28,30 C 29.1,30 30,29.1 30,28 L 30,4 C 30,2.9 28.9,2 28,2 Z M 6,6 L 26,6 L 26,8 L 6,8 Z M 6,12 L 26,12 L 26,14 L 6,14 Z M 6,18 L 18,18 L 18,20 L 6,20 Z" 
+                                  Fill="{DynamicResource AccentBrush}" Width="16" Height="16" HorizontalAlignment="Left" Stretch="Uniform"/>
+                            <TextBlock Margin="0,8,0,2" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource LauncherTextBrush}" Text="Scrolling Stitch" />
+                            <TextBlock FontSize="11" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Merge long scrolling windows" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="⌥" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="⌘" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="9" /></Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- Card 4: Import Clipboard / Canvas -->
+                    <Button Grid.Row="1" Grid.Column="1" Margin="6,6,0,0" Height="105"
+                            Style="{StaticResource LauncherActionCardStyle}"
+                            Click="BeginClipboardEditorFromGrid_Click">
+                        <StackPanel Margin="-8,-8,0,0">
+                            <!-- Clipboard Icon -->
+                            <Path Data="M 12,2 C 12,0.9 12.9,0 14,0 L 18,0 C 19.1,0 20,0.9 20,2 L 24,2 C 26.2,2 28,3.8 28,6 L 28,26 C 28,28.2 26.2,30 24,30 L 8,30 C 5.8,30 4,28.2 4,26 L 4,6 C 4,3.8 5.8,2 8,2 L 12,2 Z M 14,4 L 18,4 L 18,2 L 14,2 Z M 8,6 L 8,26 L 24,26 L 24,6 Z" 
+                                  Fill="{DynamicResource AccentBrush}" Width="16" Height="16" HorizontalAlignment="Left" Stretch="Uniform"/>
+                            <TextBlock Margin="0,8,0,2" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource LauncherTextBrush}" Text="Clipboard Load" />
+                            <TextBlock FontSize="11" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Import copied images or text" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="⌥" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="⌘" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="8" /></Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!-- 4. Windows Startup Preference Toggle (Glass Card) -->
+                <Border Grid.Row="3"
+                        Margin="0,0,0,16"
+                        Padding="14,12"
                         Background="{DynamicResource LauncherCardBrush}"
                         BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="18">
+                        BorderThickness="1.2"
+                        CornerRadius="16">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock FontWeight="SemiBold" Text="Start with Windows" />
-                            <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Launch quietly in the tray when you sign in." TextWrapping="Wrap" />
+                            <TextBlock FontSize="13" FontWeight="Bold" Foreground="{DynamicResource LauncherTextBrush}" Text="Start with Windows" />
+                            <TextBlock Margin="0,2,0,0" FontSize="11" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Quietly boot app in system tray upon login." />
                         </StackPanel>
                         <ToggleButton x:Name="StartupToggleButton"
                                       Grid.Column="1"
-                                      Margin="16,0,0,0"
+                                      Margin="12,0,0,0"
                                       VerticalAlignment="Center"
                                       Click="StartupToggleButton_Click"
                                       Style="{StaticResource LauncherSwitchStyle}" />
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="3"
-                        Margin="0,18,0,0"
-                        Padding="16"
-                        Background="{DynamicResource LauncherSubtleCardBrush}"
-                        BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="18">
-                    <StackPanel>
-                        <TextBlock FontWeight="SemiBold" Text="Default controls" />
-                        <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Drag to select. Hold Shift for 1:1, Ctrl to move the frame, arrows to nudge 1 px, Esc to cancel. Use Ctrl + Shift + Alt + 4 or Ctrl + Shift + Alt + 5 to open the capture selector island, or Ctrl + Shift + Alt + 9 to stitch a scrolling window into the editor." TextWrapping="Wrap" />
-                    </StackPanel>
-                </Border>
-
-                <TextBlock Grid.Row="4" Margin="0,20,0,0" FontSize="18" FontWeight="SemiBold" Text="Shortcuts" />
-
-                <ScrollViewer Grid.Row="5"
-                              Margin="0,12,0,0"
-                              VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel>
-                        <Border Margin="0,0,0,12" Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutPurpleBrush}" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutPurpleTextBrush}" Text="Ctrl + Shift + Alt + 4 / 5" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                    <TextBlock FontWeight="SemiBold" Text="Capture selector island" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Open a compact toolbar-style selector on the current monitor so you can choose copy, edit, clipboard, or scrolling capture." TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <Border Margin="0,0,0,12" Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutWarmBrush}" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutWarmTextBrush}" Text="Ctrl + Shift + Alt + 6" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                    <TextBlock FontWeight="SemiBold" Text="Region straight to clipboard" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Freeze the desktop, draw a region, and send the result straight to the clipboard with no extra prompt." TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <Border Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutPurpleBrush}" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutPurpleTextBrush}" Text="Ctrl + Shift + Alt + 7" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                    <TextBlock FontWeight="SemiBold" Text="Region straight to editor" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Freeze the desktop, draw a region, and open the result in the annotation editor immediately." TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <Border Margin="0,0,0,12" Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutBrush}" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutTextBrush}" Text="Ctrl + Shift + Alt + 8" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                    <TextBlock FontWeight="SemiBold" Text="Clipboard straight to editor" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Open the current clipboard image or a clipboard summary card directly in the editor." TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <Border Padding="16" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="18">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Padding="10,6" Background="{DynamicResource LauncherShortcutWarmBrush}" CornerRadius="12">
-                                    <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource LauncherShortcutWarmTextBrush}" Text="Ctrl + Shift + Alt + 9" />
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="14,0,0,0">
-                                    <TextBlock FontWeight="SemiBold" Text="Scrolling window to editor" />
-                                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Pick a window, jump to the top, scroll it down, and stitch the captured content into one tall image in the editor." TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </StackPanel>
-                </ScrollViewer>
-
-                <Grid Grid.Row="6" Margin="0,18,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                <!-- 5. Secondary Shortcuts scroll deck -->
+                <Grid Grid.Row="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
                     
-                    <TextBlock Foreground="{DynamicResource LauncherMutedTextBrush}"
-                               FontSize="12"
-                               Text="The launcher opens near the taskbar so it behaves like a quick popup."
-                               TextWrapping="Wrap"
-                               Margin="0,0,16,0"
-                               VerticalAlignment="Center"/>
+                    <TextBlock Grid.Row="0" Margin="4,2,0,8" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource LauncherTextBrush}" Text="All Shortcuts" />
+                    
+                    <ScrollViewer Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Margin="0,0,0,6">
+                        <StackPanel>
+                            <!-- Hotkey 1: Capture Hub -->
+                            <Border Margin="0,0,0,8" Padding="12,10" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Ctrl" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Shift" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Alt" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="4 / 5" /></Border>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock FontSize="12" FontWeight="Bold" Foreground="{DynamicResource LauncherTextBrush}" Text="Interactive Selector Island" />
+                                        <TextBlock Margin="0,2,0,0" FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Open selector hub popup on current screen." TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
 
-                    <!-- Update checker widget -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <!-- Subtle green indicator dot if update found -->
-                        <Ellipse x:Name="UpdateBadge" 
-                                 Width="8" 
-                                 Height="8" 
-                                 Fill="#4CAF50" 
-                                 Margin="0,0,6,0" 
-                                 VerticalAlignment="Center" 
-                                 Visibility="Collapsed" />
-                        <Button x:Name="CheckForUpdatesButton"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                Foreground="{DynamicResource LauncherShortcutTextBrush}"
-                                FontWeight="SemiBold"
-                                FontSize="12"
-                                Cursor="Hand"
-                                Click="CheckForUpdatesButton_Click"
-                                Content="Check for updates"
-                                VerticalAlignment="Center">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <TextBlock Text="{TemplateBinding Content}" TextDecorations="Underline"/>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
-                    </StackPanel>
+                            <!-- Hotkey 2: Clipboard Region -->
+                            <Border Margin="0,0,0,8" Padding="12,10" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Ctrl" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Shift" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Alt" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="6" /></Border>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock FontSize="12" FontWeight="Bold" Foreground="{DynamicResource LauncherTextBrush}" Text="Instant Capture to Clipboard" />
+                                        <TextBlock Margin="0,2,0,0" FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Crop a region straight to clipboard with no prompt." TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- Hotkey 3: Region straight to Editor -->
+                            <Border Margin="0,0,0,8" Padding="12,10" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Ctrl" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Shift" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Alt" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="7" /></Border>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock FontSize="12" FontWeight="Bold" Foreground="{DynamicResource LauncherTextBrush}" Text="Capture straight to Editor" />
+                                        <TextBlock Margin="0,2,0,0" FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Crop a region and load in annotator directly." TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- Hotkey 4: Clipboard to Editor -->
+                            <Border Margin="0,0,0,8" Padding="12,10" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Ctrl" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Shift" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Alt" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="8" /></Border>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock FontSize="12" FontWeight="Bold" Foreground="{DynamicResource LauncherTextBrush}" Text="Open Clipboard in Editor" />
+                                        <TextBlock Margin="0,2,0,0" FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Import clipboard images or text summary panels." TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- Hotkey 5: Scrolling to Editor -->
+                            <Border Margin="0,0,0,8" Padding="12,10" Background="{DynamicResource LauncherCardBrush}" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" CornerRadius="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Ctrl" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Shift" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Alt" /></Border>
+                                        <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="9" /></Border>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock FontSize="12" FontWeight="Bold" Foreground="{DynamicResource LauncherTextBrush}" Text="Stitch Scrolling Window" />
+                                        <TextBlock Margin="0,2,0,0" FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Pick scrolling pane to automatically stitch vertical page." TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            
+                            <!-- Demo Editor Sandbox Direct Link -->
+                            <Button Margin="0,4,0,4" Padding="10,8" Background="Transparent" BorderBrush="{DynamicResource LauncherPanelBorderBrush}" BorderThickness="1" Style="{StaticResource SecondaryButtonStyle}" Click="OpenEditorDemo_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Data="M 12,2 C 6.5,2 2,6.5 2,12 C 2,17.5 6.5,22 12,22 C 17.5,22 22,17.5 22,12 C 22,6.5 17.5,2 12,2 Z M 15.3,16.7 L 11,14 L 11,7 L 13,7 L 13,12.8 L 16.7,15.1 Z" 
+                                          Fill="{DynamicResource LauncherTextBrush}" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" Stretch="Uniform"/>
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Text="Launch Sandbox Demo Editor" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- 6. Real-Time Update Indicator & Banner (Footer) -->
+                <Grid Grid.Row="5" Margin="0,6,0,0">
+                    <!-- Standard status bar footer when up to date -->
+                    <Border x:Name="UpToDateFooter" Height="26">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock x:Name="AppVersionLabel" 
+                                           Foreground="{DynamicResource LauncherMutedTextBrush}" 
+                                           FontSize="11" 
+                                           Text="v0.2.19" />
+                                <TextBlock Foreground="{DynamicResource LauncherMutedTextBrush}" 
+                                           FontSize="11" 
+                                           Text=" • Running in Tray" 
+                                           Margin="4,0,0,0"/>
+                            </StackPanel>
+
+                            <!-- Check for Updates clickable text -->
+                            <Button x:Name="CheckForUpdatesButton"
+                                    Grid.Column="1"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Foreground="{DynamicResource LauncherShortcutTextBrush}"
+                                    FontWeight="SemiBold"
+                                    FontSize="11.5"
+                                    Cursor="Hand"
+                                    Click="CheckForUpdatesButton_Click"
+                                    VerticalAlignment="Center">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <TextBlock Text="{TemplateBinding Content}" TextDecorations="Underline"/>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <Button.Content>Check for updates</Button.Content>
+                            </Button>
+                        </Grid>
+                    </Border>
+                    
+                    <!-- Glowing slide-down update banner when update available -->
+                    <Border x:Name="UpdateBanner" 
+                            Background="#FFEAFDF0"
+                            BorderBrush="#FFC3EAD3"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="12,8"
+                            Height="40"
+                            VerticalAlignment="Center"
+                            Visibility="Collapsed"
+                            Cursor="Hand"
+                            MouseDown="UpdateBanner_MouseDown">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsThemeDark}" Value="True">
+                                        <!-- Keep colors highly legible in Dark Mode -->
+                                        <Setter Property="Background" Value="#1E2820"/>
+                                        <Setter Property="BorderBrush" Value="#224C33"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            
+                            <!-- Pulsing Green Indicator Ring -->
+                            <Grid Grid.Column="0" Width="14" Height="14" VerticalAlignment="Center" Margin="0,0,10,0">
+                                <Ellipse x:Name="PulsingCircle" Fill="#4CAF50" Width="8" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Ellipse Stroke="#4CAF50" StrokeThickness="1" Width="14" Height="14" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.5">
+                                    <Ellipse.Triggers>
+                                        <EventTrigger RoutedEvent="Loaded">
+                                            <BeginStoryboard>
+                                                <Storyboard RepeatBehavior="Forever">
+                                                    <DoubleAnimation Storyboard.TargetProperty="Width" From="8" To="14" Duration="0:0:1.5"/>
+                                                    <DoubleAnimation Storyboard.TargetProperty="Height" From="8" To="14" Duration="0:0:1.5"/>
+                                                    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1.0" To="0.0" Duration="0:0:1.5"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                    </Ellipse.Triggers>
+                                </Ellipse>
+                            </Grid>
+                            
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock FontWeight="Bold" FontSize="11.5" Foreground="#FF1E663B" Text="Update Available! "/>
+                                <TextBlock FontSize="11.5" x:Name="UpdateBannerVersionText" Foreground="#FF1E663B" Text="v0.2.19 is ready to install."/>
+                            </StackPanel>
+                            
+                            <!-- Upgrade CTA -->
+                            <TextBlock Grid.Column="2" FontWeight="Bold" FontSize="11.5" Foreground="{DynamicResource LauncherShortcutTextBrush}" Text="Update Now ➔" VerticalAlignment="Center" TextDecorations="Underline"/>
+                        </Grid>
+                    </Border>
                 </Grid>
             </Grid>
         </Border>
