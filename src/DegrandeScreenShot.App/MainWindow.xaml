@@ -1,4 +1,4 @@
-﻿<Window x:Class="DegrandeScreenShot.App.MainWindow"
+<Window x:Class="DegrandeScreenShot.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -269,12 +269,47 @@
                     </StackPanel>
                 </ScrollViewer>
 
-                <TextBlock Grid.Row="6"
-                           Margin="0,18,0,0"
-                           Foreground="{DynamicResource LauncherMutedTextBrush}"
-                           FontSize="12"
-                           Text="The launcher opens near the taskbar so it behaves more like a quick popup than a full landing page."
-                           TextWrapping="Wrap" />
+                <Grid Grid.Row="6" Margin="0,18,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    
+                    <TextBlock Foreground="{DynamicResource LauncherMutedTextBrush}"
+                               FontSize="12"
+                               Text="The launcher opens near the taskbar so it behaves like a quick popup."
+                               TextWrapping="Wrap"
+                               Margin="0,0,16,0"
+                               VerticalAlignment="Center"/>
+
+                    <!-- Update checker widget -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Subtle green indicator dot if update found -->
+                        <Ellipse x:Name="UpdateBadge" 
+                                 Width="8" 
+                                 Height="8" 
+                                 Fill="#4CAF50" 
+                                 Margin="0,0,6,0" 
+                                 VerticalAlignment="Center" 
+                                 Visibility="Collapsed" />
+                        <Button x:Name="CheckForUpdatesButton"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Foreground="{DynamicResource LauncherShortcutTextBrush}"
+                                FontWeight="SemiBold"
+                                FontSize="12"
+                                Cursor="Hand"
+                                Click="CheckForUpdatesButton_Click"
+                                Content="Check for updates"
+                                VerticalAlignment="Center">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <TextBlock Text="{TemplateBinding Content}" TextDecorations="Underline"/>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
+                </Grid>
             </Grid>
         </Border>
     </Grid>

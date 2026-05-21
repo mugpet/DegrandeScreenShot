@@ -36,6 +36,8 @@ public partial class MainWindow : Window
     private bool _isUpdatingStartupToggle;
     private bool _hotKeysRegistered;
     private bool _isCaptureTypeSelectorOpen;
+    private GitHubRelease? _latestReleaseCached;
+    private GitHubAsset? _installerAssetCached;
 
     public MainWindow(bool startHiddenInTray = false)
     {
@@ -128,7 +130,7 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(ApplyLauncherTheme);
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         PositionLikeTaskbarPopup();
 
@@ -137,6 +139,33 @@ public partial class MainWindow : Window
             HideToTray();
             Opacity = 1;
             _startHiddenInTray = false;
+        }
+
+        await RunQuietBackgroundUpdateCheckAsync();
+    }
+
+    private async Task RunQuietBackgroundUpdateCheckAsync()
+    {
+        try
+        {
+            var release = await UpdateService.GetLatestReleaseAsync();
+            if (release == null) return;
+
+            var current = UpdateService.GetCurrentVersion();
+            if (UpdateService.IsUpdateAvailable(release.TagName, current, out _))
+            {
+                var asset = UpdateService.FindInstallerAsset(release);
+                if (asset != null)
+                {
+                    _latestReleaseCached = release;
+                    _installerAssetCached = asset;
+                    UpdateBadge.Visibility = Visibility.Visible;
+                }
+            }
+        }
+        catch
+        {
+            // Fail silently on background check
         }
     }
 
@@ -313,6 +342,73 @@ public partial class MainWindow : Window
     private void CloseWindow_Click(object sender, RoutedEventArgs e)
     {
         HideToTray();
+    }
+
+    private async void CheckForUpdatesButton_Click(object sender, RoutedEventArgs e)
+    {
+        CheckForUpdatesButton.IsEnabled = false;
+        try
+        {
+            if (_latestReleaseCached != null && _installerAssetCached != null)
+            {
+                ShowUpdateWindow(_latestReleaseCached, _installerAssetCached);
+                return;
+            }
+
+            var originalContent = CheckForUpdatesButton.Content;
+            CheckForUpdatesButton.Content = "Checking...";
+
+            var release = await UpdateService.GetLatestReleaseAsync();
+            if (release != null)
+            {
+                var current = UpdateService.GetCurrentVersion();
+                if (UpdateService.IsUpdateAvailable(release.TagName, current, out _))
+                {
+                    var asset = UpdateService.FindInstallerAsset(release);
+                    if (asset != null)
+                    {
+                        _latestReleaseCached = release;
+                        _installerAssetCached = asset;
+                        UpdateBadge.Visibility = Visibility.Visible;
+
+                        CheckForUpdatesButton.Content = originalContent;
+                        ShowUpdateWindow(release, asset);
+                        return;
+                    }
+                }
+            }
+
+            CheckForUpdatesButton.Content = originalContent;
+            var currentVer = UpdateService.GetCurrentVersion().ToString(3);
+            MessageBox.Show(
+                this,
+                $"You are up to date!\nVersion {currentVer} is the latest available.",
+                "Software Update",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                $"Failed to check for updates:\n{ex.Message}",
+                "Update Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            CheckForUpdatesButton.IsEnabled = true;
+        }
+    }
+
+    private void ShowUpdateWindow(GitHubRelease release, GitHubAsset asset)
+    {
+        var updateWindow = new UpdateWindow(release, asset)
+        {
+            Owner = this
+        };
+        updateWindow.ShowDialog();
     }
 
     private void BeginCaptureTypeSelectorFromHotKey()

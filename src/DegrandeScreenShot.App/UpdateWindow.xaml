@@ -1,0 +1,158 @@
+<Window x:Class="DegrandeScreenShot.App.UpdateWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Software Update"
+        Width="430"
+        Height="420"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False">
+    <Window.Resources>
+        <Style x:Key="ModernProgressBarStyle" TargetType="ProgressBar">
+            <Setter Property="Height" Value="10" />
+            <Setter Property="Background" Value="{DynamicResource PanelBorderBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid x:Name="TemplateRoot">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="5" />
+                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="5" Background="{DynamicResource AccentBrush}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Border Margin="12"
+                Padding="20"
+                Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="20">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="6" Color="#20000000" Opacity="0.3" />
+            </Border.Effect>
+            
+            <Grid>
+                <Grid.RowDefinitions>
+                    <!-- Header with Title and drag surface -->
+                    <RowDefinition Height="Auto" />
+                    <!-- Version comparison line -->
+                    <RowDefinition Height="Auto" />
+                    <!-- Release Notes Panel -->
+                    <RowDefinition Height="*" />
+                    <!-- Download progress area (hidden by default) -->
+                    <RowDefinition Height="Auto" />
+                    <!-- Footer action buttons -->
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Header -->
+                <Grid Grid.Row="0" MouseLeftButtonDown="Header_MouseLeftButtonDown" Background="Transparent">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Text="SOFTWARE UPDATE" />
+                        <TextBlock Margin="0,4,0,0" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Text="Update Available!" />
+                    </StackPanel>
+                    
+                    <Button Grid.Column="1"
+                            Width="28"
+                            Height="28"
+                            VerticalAlignment="Top"
+                            Click="CloseButton_Click"
+                            Background="Transparent"
+                            BorderBrush="Transparent"
+                            Foreground="{DynamicResource MutedTextBrush}"
+                            Cursor="Hand"
+                            Content="✕"
+                            FontSize="14"
+                            FontWeight="Bold" />
+                </Grid>
+
+                <!-- Version Info -->
+                <TextBlock Grid.Row="1"
+                           x:Name="VersionInfoTextBlock"
+                           Margin="0,12,0,0"
+                           FontSize="14"
+                           Foreground="{DynamicResource TextBrush}"
+                           TextWrapping="Wrap"
+                           Text="A new version of Degrande ScreenShot is available." />
+
+                <!-- Release Notes TextBox -->
+                <Border Grid.Row="2"
+                        Margin="0,14,0,0"
+                        Background="{DynamicResource AppBackgroundBrush}"
+                        BorderBrush="{DynamicResource PanelBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="4">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <TextBox x:Name="ReleaseNotesTextBox"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="{DynamicResource TextBrush}"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 IsReadOnly="True"
+                                 FontSize="13"
+                                 Padding="8"
+                                 FontFamily="Segoe UI, Consolas" />
+                    </ScrollViewer>
+                </Border>
+
+                <!-- Download Progress Area -->
+                <StackPanel Grid.Row="3" x:Name="ProgressArea" Margin="0,14,0,0" Visibility="Collapsed">
+                    <Grid>
+                        <TextBlock x:Name="StatusTextBlock" FontSize="13" Foreground="{DynamicResource TextBrush}" Text="Downloading..." />
+                        <TextBlock x:Name="PercentageTextBlock" HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Text="0%" />
+                    </Grid>
+                    <ProgressBar x:Name="DownloadProgressBar"
+                                 Margin="0,6,0,0"
+                                 Value="0"
+                                 Maximum="100"
+                                 Style="{DynamicResource ModernProgressBarStyle}" />
+                </StackPanel>
+
+                <!-- Actions Footer -->
+                <Grid Grid.Row="4" Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    
+                    <Button x:Name="LaterButton"
+                            Grid.Column="0"
+                            Margin="0,0,8,0"
+                            Click="CloseButton_Click"
+                            Background="Transparent"
+                            BorderBrush="{DynamicResource PanelBorderBrush}"
+                            Foreground="{DynamicResource TextBrush}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Content="Later" />
+                    
+                    <Button x:Name="UpdateNowButton"
+                            Grid.Column="1"
+                            Margin="8,0,0,0"
+                            Click="UpdateNowButton_Click"
+                            Background="{DynamicResource AccentBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}"
+                            Foreground="White"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Content="Update Now" />
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

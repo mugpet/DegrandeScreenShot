@@ -1,4 +1,7 @@
-﻿using DegrandeScreenShot.Core;
+using DegrandeScreenShot.Core;
+using DegrandeScreenShot.App;
+using DegrandeScreenShot.App.Services;
+using System.Collections.Generic;
 
 namespace DegrandeScreenShot.Tests;
 
@@ -210,5 +213,85 @@ public class ScrollCaptureStitcherTests
         var overlap = ScrollCaptureStitcher.FindVerticalOverlap(existingRows, incomingRows, minOverlapRows: 45);
 
         Assert.Equal(306, overlap);
+    }
+}
+
+public class UpdateServiceTests
+{
+    [Theory]
+    [InlineData("v0.2.17", "0.2.16.0", true)]
+    [InlineData("v0.2.17", "0.2.17.0", false)]
+    [InlineData("0.2.18", "0.2.17.5", true)]
+    [InlineData("v0.2.16", "0.2.17.0", false)]
+    [InlineData("invalid", "0.2.16.0", false)]
+    [InlineData("", "0.2.16.0", false)]
+    [InlineData("  v0.2.19  ", "0.2.18.0", true)]
+    public void IsUpdateAvailableCorrectlyComparesVersions(string tag, string currentStr, bool expected)
+    {
+        var current = Version.Parse(currentStr);
+        var actual = UpdateService.IsUpdateAvailable(tag, current, out var parsedVersion);
+        
+        Assert.Equal(expected, actual);
+        if (actual)
+        {
+            Assert.NotNull(parsedVersion);
+        }
+    }
+
+    [Fact]
+    public void FindInstallerAssetPrioritizesSetupExe()
+    {
+        var release = new GitHubRelease(
+            TagName: "v0.2.17",
+            Name: "v0.2.17",
+            Body: "Notes",
+            Assets: new List<GitHubAsset>
+            {
+                new("DegrandeScreenShot-Setup-0.2.17.exe", "https://example.com/setup"),
+                new("DegrandeScreenShot-Portable-0.2.17.zip", "https://example.com/zip"),
+                new("some-other-file.exe", "https://example.com/other")
+            }
+        );
+
+        var asset = UpdateService.FindInstallerAsset(release);
+        Assert.NotNull(asset);
+        Assert.Equal("DegrandeScreenShot-Setup-0.2.17.exe", asset.Name);
+    }
+
+    [Fact]
+    public void FindInstallerAssetFallsBackToAnyExe()
+    {
+        var release = new GitHubRelease(
+            TagName: "v0.2.17",
+            Name: "v0.2.17",
+            Body: "Notes",
+            Assets: new List<GitHubAsset>
+            {
+                new("DegrandeScreenShot-Portable-0.2.17.zip", "https://example.com/zip"),
+                new("degrande.exe", "https://example.com/exe")
+            }
+        );
+
+        var asset = UpdateService.FindInstallerAsset(release);
+        Assert.NotNull(asset);
+        Assert.Equal("degrande.exe", asset.Name);
+    }
+
+    [Fact]
+    public void FindInstallerAssetFallsBackToFirstAsset()
+    {
+        var release = new GitHubRelease(
+            TagName: "v0.2.17",
+            Name: "v0.2.17",
+            Body: "Notes",
+            Assets: new List<GitHubAsset>
+            {
+                new("DegrandeScreenShot-Portable-0.2.17.zip", "https://example.com/zip")
+            }
+        );
+
+        var asset = UpdateService.FindInstallerAsset(release);
+        Assert.NotNull(asset);
+        Assert.Equal("DegrandeScreenShot-Portable-0.2.17.zip", asset.Name);
     }
 }
