@@ -122,6 +122,13 @@ public partial class EditorWindow : Window
     private bool _lastArrowHasStartHead;
     private bool _lastArrowHasEndHead = true;
     private List<(double U, double V)> _lastArrowRelativeBendPoints = new();
+    private double _lastArrowScale = 1.0;
+    private double _lastShapeScale = 1.0;
+    private double _lastHighlightScale = 1.0;
+    private double _lastObscureScale = 1.0;
+    private double _lastTextScale = 1.0;
+    private AnnotationBase? _dragOriginalAnnotation;
+    private bool _hasDuplicatedDuringCurrentDrag;
     private readonly List<ArrowShapePresetPreference> _arrowShapePresets = [];
     private string? _selectedArrowPresetId;
     private Color _lastHighlightColor = DefaultHighlightColor;
@@ -235,6 +242,7 @@ public partial class EditorWindow : Window
     private void EditorWindow_DpiChanged(object sender, DpiChangedEventArgs e)
     {
         UpdateMaxWindowSize();
+        ApplyZoomTransform();
     }
 
     private void EditorWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -479,6 +487,7 @@ public partial class EditorWindow : Window
 
             UpdateSelectionAnnotationControls(_selectedAnnotation);
             RefreshCanvas();
+            UpdateEditorCursor();
         }
     }
 
@@ -543,14 +552,19 @@ public partial class EditorWindow : Window
 
         if (TryBeginExistingAnnotationInteraction(point))
         {
-            if (_dragOperation == DragOperation.Move
-                && _selectedAnnotation is not null
-                && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            if (_dragOperation == DragOperation.Move && _selectedAnnotation is not null)
             {
-                var duplicate = _selectedAnnotation.Clone();
-                _annotations.Add(duplicate);
-                _selectedAnnotation = duplicate;
-                _hoveredAnnotation = duplicate;
+                _dragOriginalAnnotation = _selectedAnnotation.Clone();
+                _hasDuplicatedDuringCurrentDrag = false;
+
+                if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+                {
+                    var duplicate = _selectedAnnotation.Clone();
+                    _annotations.Add(duplicate);
+                    _selectedAnnotation = duplicate;
+                    _hoveredAnnotation = duplicate;
+                    _hasDuplicatedDuringCurrentDrag = true;
+                }
             }
 
             RefreshCanvas();
@@ -604,6 +618,7 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Rectangle)
         {
             var annotation = new RectangleAnnotation { Bounds = new Rect(point, point) };
+            annotation.SetScale(_lastShapeScale);
             annotation.SetColor(_lastShapeColor);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
@@ -615,6 +630,7 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Ellipse)
         {
             var annotation = new EllipseAnnotation { Bounds = new Rect(point, point) };
+            annotation.SetScale(_lastShapeScale);
             annotation.SetColor(_lastShapeColor);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
@@ -700,6 +716,8 @@ public partial class EditorWindow : Window
 
         _selectedAnnotation = annotation;
         _hoveredAnnotation = annotation;
+        _contextMenuAnnotation = annotation;
+        UpdateSelectionAnnotationControls(annotation);
         _activeHandle = annotation.HitHandle(point);
 
         CommitInlineTextEditing();
@@ -818,7 +836,9 @@ public partial class EditorWindow : Window
 
         if (_dragStart is null || e.LeftButton != MouseButtonState.Pressed || _selectedAnnotation is null)
         {
-            UpdateHoveredAnnotation(ToDocumentPoint(e.GetPosition(AnnotationCanvas)));
+            var mousePos = e.GetPosition(AnnotationCanvas);
+            UpdateHoveredAnnotation(ToDocumentPoint(mousePos));
+            UpdateEditorCursor(mousePos);
             return;
         }
 
@@ -834,6 +854,12 @@ public partial class EditorWindow : Window
                 }
                 break;
             case DragOperation.Move:
+                if (!_hasDuplicatedDuringCurrentDrag && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control && _dragOriginalAnnotation is not null)
+                {
+                    _annotations.Add(_dragOriginalAnnotation);
+                    _hasDuplicatedDuringCurrentDrag = true;
+                }
+
                 _selectedAnnotation.Move(point - _dragStart.Value);
                 ClampSelectedObscureAnnotationToCanvas(preserveSize: true);
                 _dragStart = point;
@@ -912,11 +938,13 @@ public partial class EditorWindow : Window
     {
         if (_hoveredAnnotation is null)
         {
+            UpdateEditorCursor();
             return;
         }
 
         _hoveredAnnotation = null;
         RefreshCanvas();
+        UpdateEditorCursor();
     }
 
     private void AnnotationCanvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -957,7 +985,14 @@ public partial class EditorWindow : Window
             CommitHistoryState();
         }
 
+        if (_selectedAnnotation is not null)
+        {
+            _contextMenuAnnotation = _selectedAnnotation;
+            UpdateSelectionAnnotationControls(_selectedAnnotation);
+        }
+
         RefreshCanvas();
+        UpdateEditorCursor(e.GetPosition(AnnotationCanvas));
     }
 
     private void ApplyCrop_Click(object sender, RoutedEventArgs e)
@@ -1254,6 +1289,29 @@ public partial class EditorWindow : Window
         }
 
         annotation.SetScale(e.NewValue);
+
+        // Save default scale for future objects of this type
+        if (annotation is ArrowAnnotation)
+        {
+            _lastArrowScale = e.NewValue;
+        }
+        else if (annotation is TextAnnotation)
+        {
+            _lastTextScale = e.NewValue;
+        }
+        else if (annotation is HighlightAnnotation)
+        {
+            _lastHighlightScale = e.NewValue;
+        }
+        else if (annotation is ObscureAnnotation)
+        {
+            _lastObscureScale = e.NewValue;
+        }
+        else if (annotation is RectangleAnnotation or EllipseAnnotation)
+        {
+            _lastShapeScale = e.NewValue;
+        }
+
         CommitHistoryState();
         RefreshCanvas();
     }
@@ -1262,8 +1320,33 @@ public partial class EditorWindow : Window
     {
         if (_contextMenuAnnotation is AnnotationBase annotation)
         {
+            _isUpdatingObjectScale = true;
+            ObjectScaleSlider.Value = 1.0;
+            _isUpdatingObjectScale = false;
             annotation.ResetScale();
-            UpdateObjectScaleControls(annotation);
+
+            // Save default scale as 1.0
+            if (annotation is ArrowAnnotation)
+            {
+                _lastArrowScale = 1.0;
+            }
+            else if (annotation is TextAnnotation)
+            {
+                _lastTextScale = 1.0;
+            }
+            else if (annotation is HighlightAnnotation)
+            {
+                _lastHighlightScale = 1.0;
+            }
+            else if (annotation is ObscureAnnotation)
+            {
+                _lastObscureScale = 1.0;
+            }
+            else if (annotation is RectangleAnnotation or EllipseAnnotation)
+            {
+                _lastShapeScale = 1.0;
+            }
+
             CommitHistoryState();
             RefreshCanvas();
         }
@@ -1490,6 +1573,16 @@ public partial class EditorWindow : Window
             return;
         }
 
+        if (modifiers.HasFlag(ModifierKeys.Control) && e.Key == Key.D)
+        {
+            if (_selectedAnnotation is not null && _editingTextAnnotation is null)
+            {
+                DuplicateSelectedAnnotation();
+                e.Handled = true;
+                return;
+            }
+        }
+
         if (e.Key != Key.Delete || _selectedAnnotation is null || _editingTextAnnotation is not null)
         {
             return;
@@ -1499,6 +1592,30 @@ public partial class EditorWindow : Window
         CommitHistoryState();
         RefreshCanvas();
         e.Handled = true;
+    }
+
+    private void DuplicateSelectedAnnotation()
+    {
+        if (_selectedAnnotation is null)
+        {
+            return;
+        }
+
+        var duplicate = _selectedAnnotation.Clone();
+        duplicate.Move(new Vector(20, 20));
+        _annotations.Add(duplicate);
+        _selectedAnnotation = duplicate;
+        _hoveredAnnotation = duplicate;
+        _contextMenuAnnotation = duplicate;
+        UpdateSelectionAnnotationControls(duplicate);
+
+        if (duplicate is ObscureAnnotation)
+        {
+            ClampSelectedObscureAnnotationToCanvas(preserveSize: true);
+        }
+
+        CommitHistoryState();
+        RefreshCanvas();
     }
 
     private void UndoHistory_Click(object sender, RoutedEventArgs e)
@@ -2267,7 +2384,8 @@ public partial class EditorWindow : Window
                 TailHeadScale: arrow.TailHeadScale,
                 TailRoundness: arrow.TailRoundness,
                 HeadRoundness: arrow.HeadRoundness,
-                BendPoints: CreateRelativeArrowPresetPoints(arrow));
+                BendPoints: CreateRelativeArrowPresetPoints(arrow),
+                Scale: arrow.Scale);
         }
 
         return new ArrowShapePresetPreference(
@@ -2281,14 +2399,16 @@ public partial class EditorWindow : Window
             HasStartHead: _lastArrowHasStartHead,
             HasEndHead: _lastArrowHasEndHead,
             TailHeadScale: _lastArrowTailHeadScale,
-                TailRoundness: _lastArrowTailRoundness,
-                HeadRoundness: _lastArrowHeadRoundness,
-            BendPoints: _lastArrowRelativeBendPoints.Select(point => new ArrowPresetPointPreference(point.U, point.V)).ToList());
+            TailRoundness: _lastArrowTailRoundness,
+            HeadRoundness: _lastArrowHeadRoundness,
+            BendPoints: _lastArrowRelativeBendPoints.Select(point => new ArrowPresetPointPreference(point.U, point.V)).ToList(),
+            Scale: _lastArrowScale);
     }
 
     private void ApplyArrowPreset(ArrowShapePresetPreference preset)
     {
         _selectedArrowPresetId = preset.Id;
+        _lastArrowScale = preset.Scale ?? 1.0;
         _lastArrowTailScale = Math.Clamp(preset.TailScale, 0.15, 3.0);
         _lastArrowBodyScale = Math.Clamp(preset.BodyScale, 0.15, 3.0);
         _lastArrowFrontScale = Math.Clamp(preset.FrontScale, 0.15, 3.0);
@@ -2327,6 +2447,7 @@ public partial class EditorWindow : Window
     {
         var arrow = ArrowAnnotation.Create(new Point(4, 33));
         arrow.End = new Point(104, 33);
+        arrow.SetScale(preset.Scale ?? 1.0);
         arrow.SetTailScale(preset.TailScale);
         arrow.SetBodyScale(preset.BodyScale);
         arrow.SetFrontScale(preset.FrontScale);
@@ -2552,6 +2673,7 @@ public partial class EditorWindow : Window
             case EditorTool.Rectangle:
             {
                 var annotation = new RectangleAnnotation { Bounds = new Rect(point, point) };
+                annotation.SetScale(_lastShapeScale);
                 annotation.SetColor(_lastShapeColor);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
@@ -2561,6 +2683,7 @@ public partial class EditorWindow : Window
             case EditorTool.Ellipse:
             {
                 var annotation = new EllipseAnnotation { Bounds = new Rect(point, point) };
+                annotation.SetScale(_lastShapeScale);
                 annotation.SetColor(_lastShapeColor);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
@@ -2602,6 +2725,7 @@ public partial class EditorWindow : Window
 
     private void ApplyLastUsedTextStyle(TextAnnotation textAnnotation)
     {
+        textAnnotation.SetScale(_lastTextScale);
         textAnnotation.SetColor(_lastTextColor);
         textAnnotation.SetFontSize(_lastTextFontSize);
         textAnnotation.SetBackgroundOpacity(_lastTextBackgroundOpacity);
@@ -2613,6 +2737,7 @@ public partial class EditorWindow : Window
     private void ApplyLastUsedArrowStyle(ArrowAnnotation arrowAnnotation)
     {
         arrowAnnotation.SetStyle(ArrowStyle.BrushStroke);
+        arrowAnnotation.SetScale(_lastArrowScale);
         arrowAnnotation.SetTailScale(_lastArrowTailScale);
         arrowAnnotation.SetBodyScale(_lastArrowBodyScale);
         arrowAnnotation.SetFrontScale(_lastArrowFrontScale);
@@ -2629,6 +2754,7 @@ public partial class EditorWindow : Window
 
     private void ApplyLastUsedHighlightStyle(HighlightAnnotation highlightAnnotation)
     {
+        highlightAnnotation.SetScale(_lastHighlightScale);
         highlightAnnotation.SetColor(_lastHighlightColor);
         highlightAnnotation.SetColorStrength(_lastHighlightStrength);
     }
@@ -2659,6 +2785,7 @@ public partial class EditorWindow : Window
 
     private void CaptureArrowDefaults(ArrowAnnotation arrow, bool preserveSelectedPreset = false)
     {
+        _lastArrowScale = arrow.Scale;
         _lastArrowColor = arrow.StrokeColor;
         _lastArrowStyle = arrow.Style;
         _lastArrowTailScale = arrow.TailScale;
@@ -2683,6 +2810,7 @@ public partial class EditorWindow : Window
 
     private void ApplyLastUsedObscureStyle(ObscureAnnotation obscureAnnotation)
     {
+        obscureAnnotation.SetScale(_lastObscureScale);
         obscureAnnotation.SetColor(_lastObscureColor);
         obscureAnnotation.SetBlurLevel(_lastObscureBlurLevel);
         obscureAnnotation.SetPixelationLevel(_lastObscurePixelationLevel);
@@ -3116,6 +3244,7 @@ public partial class EditorWindow : Window
         }
 
         UpdateMaxWindowSize();
+        ApplyZoomTransform();
         UpdateLayout();
 
         GrowWindowToFitArtwork();
@@ -3147,8 +3276,140 @@ public partial class EditorWindow : Window
 
     private void ApplyZoomTransform()
     {
-        ArtworkZoomTransform.ScaleX = _zoomLevel;
-        ArtworkZoomTransform.ScaleY = _zoomLevel;
+        if (_workingImage == null)
+        {
+            ArtworkZoomTransform.ScaleX = _zoomLevel;
+            ArtworkZoomTransform.ScaleY = _zoomLevel;
+            return;
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var screenDpiScaleX = dpi.DpiScaleX;
+        var screenDpiScaleY = dpi.DpiScaleY;
+
+        ArtworkZoomTransform.ScaleX = _zoomLevel * (_workingImage.DpiX / (96.0 * screenDpiScaleX));
+        ArtworkZoomTransform.ScaleY = _zoomLevel * (_workingImage.DpiY / (96.0 * screenDpiScaleY));
+    }
+
+    private void UpdateEditorCursor(Point? mousePos = null)
+    {
+        if (AnnotationCanvas == null)
+        {
+            return;
+        }
+
+        if (_currentTool != EditorTool.Select)
+        {
+            switch (_currentTool)
+            {
+                case EditorTool.Crop:
+                    var cropDocPoint = mousePos is not null ? ToDocumentPoint(mousePos.Value) : (Point?)null;
+                    if (cropDocPoint is not null && _cropSelection is not null)
+                    {
+                        var handle = HitCropHandle(_cropSelection.Value, cropDocPoint.Value);
+                        switch (handle)
+                        {
+                            case CropHandle.TopLeft:
+                            case CropHandle.BottomRight:
+                                AnnotationCanvas.Cursor = Cursors.SizeNWSE;
+                                return;
+                            case CropHandle.TopRight:
+                            case CropHandle.BottomLeft:
+                                AnnotationCanvas.Cursor = Cursors.SizeNESW;
+                                return;
+                            case CropHandle.Left:
+                            case CropHandle.Right:
+                                AnnotationCanvas.Cursor = Cursors.SizeWE;
+                                return;
+                            case CropHandle.Top:
+                            case CropHandle.Bottom:
+                                AnnotationCanvas.Cursor = Cursors.SizeNS;
+                                return;
+                            case CropHandle.Move:
+                                AnnotationCanvas.Cursor = Cursors.SizeAll;
+                                return;
+                        }
+                    }
+                    AnnotationCanvas.Cursor = Cursors.Cross;
+                    break;
+                case EditorTool.Arrow:
+                    AnnotationCanvas.Cursor = Cursors.Cross;
+                    break;
+                case EditorTool.Rectangle:
+                    AnnotationCanvas.Cursor = Cursors.Cross;
+                    break;
+                case EditorTool.Ellipse:
+                    AnnotationCanvas.Cursor = Cursors.Cross;
+                    break;
+                case EditorTool.Obscure:
+                    AnnotationCanvas.Cursor = Cursors.Cross;
+                    break;
+                case EditorTool.Highlight:
+                    AnnotationCanvas.Cursor = Cursors.Pen;
+                    break;
+                case EditorTool.Text:
+                    AnnotationCanvas.Cursor = Cursors.IBeam;
+                    break;
+                default:
+                    AnnotationCanvas.Cursor = Cursors.Arrow;
+                    break;
+            }
+            return;
+        }
+
+        // If Select tool is active:
+        if (mousePos is null)
+        {
+            AnnotationCanvas.Cursor = Cursors.Arrow;
+            return;
+        }
+
+        var docPoint = ToDocumentPoint(mousePos.Value);
+
+        // Check if hovering over selected annotation's handles
+        if (_selectedAnnotation is not null)
+        {
+            var handle = _selectedAnnotation.HitHandle(docPoint);
+            if (handle is not null)
+            {
+                if (handle.Contains("TopLeft") || handle.Contains("BottomRight"))
+                {
+                    AnnotationCanvas.Cursor = Cursors.SizeNWSE;
+                }
+                else if (handle.Contains("TopRight") || handle.Contains("BottomLeft"))
+                {
+                    AnnotationCanvas.Cursor = Cursors.SizeNESW;
+                }
+                else if (handle.Contains("Left") || handle.Contains("Right"))
+                {
+                    AnnotationCanvas.Cursor = Cursors.SizeWE;
+                }
+                else if (handle.Contains("Top") || handle.Contains("Bottom"))
+                {
+                    AnnotationCanvas.Cursor = Cursors.SizeNS;
+                }
+                else if (handle.StartsWith("Bend:", StringComparison.Ordinal) || handle.StartsWith("Head:", StringComparison.Ordinal) || handle.StartsWith("Tail:", StringComparison.Ordinal))
+                {
+                    AnnotationCanvas.Cursor = Cursors.Hand;
+                }
+                else
+                {
+                    AnnotationCanvas.Cursor = Cursors.Hand;
+                }
+                return;
+            }
+        }
+
+        // Check if hovering over any annotation body
+        var hovered = GetAnnotationsInHitTestOrder().FirstOrDefault(annotation => annotation.HitTest(docPoint));
+        if (hovered is not null)
+        {
+            AnnotationCanvas.Cursor = Cursors.SizeAll;
+        }
+        else
+        {
+            AnnotationCanvas.Cursor = Cursors.Arrow;
+        }
     }
 
     private void GrowWindowToFitArtwork()
@@ -3860,7 +4121,8 @@ public partial class EditorWindow : Window
             HeadRoundness: Math.Clamp(preset.HeadRoundness ?? DefaultArrowHeadRoundness, 0, 1),
             BendPoints: (preset.BendPoints ?? [])
                 .Select(point => new ArrowPresetPointPreference(point.U, point.V))
-                .ToList());
+                .ToList(),
+            Scale: preset.Scale ?? 1.0);
     }
 
     private enum ThemePreference

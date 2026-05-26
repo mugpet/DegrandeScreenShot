@@ -125,6 +125,7 @@ internal sealed record ArrowShapePresetPreference(
     double? TailHeadScale,
     double? TailRoundness,
     double? HeadRoundness,
-    List<ArrowPresetPointPreference>? BendPoints);
+    List<ArrowPresetPointPreference>? BendPoints,
+    double? Scale = 1.0);
 
 internal sealed record ArrowPresetPointPreference(double U, double V);
