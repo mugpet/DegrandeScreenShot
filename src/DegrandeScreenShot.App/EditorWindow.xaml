@@ -359,6 +359,27 @@
             <Setter Property="Background" Value="{DynamicResource EditorSliderFillBrush}" />
         </Style>
 
+        <Style x:Key="EditorVerticalSliderTrackButtonStyle" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="Background" Value="{DynamicResource EditorSliderTrackBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Width="6"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3"
+                                SnapsToDevicePixels="True" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EditorVerticalSliderFillButtonStyle" TargetType="RepeatButton" BasedOn="{StaticResource EditorVerticalSliderTrackButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource EditorSliderFillBrush}" />
+        </Style>
+
         <Style x:Key="EditorSliderThumbStyle" TargetType="Thumb">
             <Setter Property="Width" Value="14" />
             <Setter Property="Height" Value="14" />
@@ -418,6 +439,43 @@
                                 <Track.IncreaseRepeatButton>
                                     <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
                                                   Style="{StaticResource EditorSliderTrackButtonStyle}" />
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource EditorSliderThumbStyle}" />
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="EditorVerticalSliderStyle" TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="MinWidth" Value="24" />
+            <Setter Property="Height" Value="170" />
+            <Setter Property="MinHeight" Value="120" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Width="24" SnapsToDevicePixels="True">
+                            <Track x:Name="PART_Track"
+                                   Width="18"
+                                   Orientation="Vertical"
+                                   VerticalAlignment="Stretch"
+                                   HorizontalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  Style="{StaticResource EditorVerticalSliderFillButtonStyle}" />
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  Style="{StaticResource EditorVerticalSliderTrackButtonStyle}" />
                                 </Track.IncreaseRepeatButton>
                                 <Track.Thumb>
                                     <Thumb Style="{StaticResource EditorSliderThumbStyle}" />
@@ -817,24 +875,6 @@
                                     <Border Width="20" Height="20" Background="#111827" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                             </StackPanel>
-                            <StackPanel x:Name="ObjectScalePanel" Orientation="Horizontal" Margin="8,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
-                                <Border Width="1" Height="24" Margin="0,0,8,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
-                                <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource IslandMutedTextBrush}" Text="Scale" VerticalAlignment="Center" Margin="0,0,4,0" />
-                                <Slider x:Name="ObjectScaleSlider" Width="90" Minimum="0.1" Maximum="3.0" SmallChange="0.05" LargeChange="0.2" TickFrequency="0.05" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ObjectScaleSlider_ValueChanged" ToolTip="Object scale size" />
-                                <TextBlock x:Name="ObjectScaleValueLabel" Width="36" Margin="2,0,4,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="100%" />
-                                <Button x:Name="ResetScaleButton"
-                                        Width="22"
-                                        Height="22"
-                                        Padding="0"
-                                        Click="ResetScaleButton_Click"
-                                        Background="{DynamicResource SecondaryButtonBrush}"
-                                        Foreground="{DynamicResource IslandTextBrush}"
-                                        BorderBrush="{DynamicResource SecondaryButtonBorderBrush}"
-                                        BorderThickness="1"
-                                        ToolTip="Reset object scale to 100%">
-                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" FontSize="10" Margin="0" Text="&#xE72C;" />
-                                </Button>
-                            </StackPanel>
                             <StackPanel x:Name="ResetActionPanel" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
                                 <Button Width="34"
                                         Height="28"
@@ -1068,31 +1108,6 @@
                                     <TextBlock x:Name="ArrowHeadValueLabel" Width="34" Margin="4,0,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="1.0" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="11,8,0,0" VerticalAlignment="Center">
-                                    <ToggleButton x:Name="ArrowHeadToggleButton"
-                                                  Width="34"
-                                                  Height="28"
-                                                  Margin="0,0,10,0"
-                                                  Padding="0"
-                                                  Checked="ArrowHeadToggleButton_Checked"
-                                                  Unchecked="ArrowHeadToggleButton_Checked"
-                                                  Style="{StaticResource EditorTopBarToolButtonStyle}"
-                                                  ToolTip="Toggle the front arrow head">
-                                        <Viewbox Width="17" Height="17">
-                                            <Canvas Width="18" Height="18">
-                                                <Line X1="3" Y1="9" X2="14" Y2="9"
-                                                      Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
-                                                      StrokeThickness="1.8"
-                                                      StrokeStartLineCap="Round"
-                                                      StrokeEndLineCap="Round" />
-                                                <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
-                                                      StrokeThickness="1.8"
-                                                      StrokeStartLineCap="Round"
-                                                      StrokeEndLineCap="Round"
-                                                      StrokeLineJoin="Round"
-                                                      Data="M10,5 L14,9 L10,13" />
-                                            </Canvas>
-                                        </Viewbox>
-                                    </ToggleButton>
                                     <ToggleButton x:Name="ArrowTailToggleButton"
                                                   Width="34"
                                                   Height="28"
@@ -1118,12 +1133,37 @@
                                             </Canvas>
                                         </Viewbox>
                                     </ToggleButton>
+                                    <ToggleButton x:Name="ArrowHeadToggleButton"
+                                                  Width="34"
+                                                  Height="28"
+                                                  Margin="0,0,10,0"
+                                                  Padding="0"
+                                                  Checked="ArrowHeadToggleButton_Checked"
+                                                  Unchecked="ArrowHeadToggleButton_Checked"
+                                                  Style="{StaticResource EditorTopBarToolButtonStyle}"
+                                                  ToolTip="Toggle the front arrow head">
+                                        <Viewbox Width="17" Height="17">
+                                            <Canvas Width="18" Height="18">
+                                                <Line X1="3" Y1="9" X2="14" Y2="9"
+                                                      Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                      StrokeThickness="1.8"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round" />
+                                                <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Control}, Path=Foreground}"
+                                                      StrokeThickness="1.8"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      Data="M10,5 L14,9 L10,13" />
+                                            </Canvas>
+                                        </Viewbox>
+                                    </ToggleButton>
                                     <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Tail head" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <Slider x:Name="ArrowTailHeadSlider" Width="96" Minimum="0.2" Maximum="1.6" SmallChange="0.05" LargeChange="0.2" TickFrequency="0.05" IsSnapToTickEnabled="True" VerticalAlignment="Center" ValueChanged="ArrowTailHeadSlider_ValueChanged" ToolTip="Tail head size" />
                                     <TextBlock x:Name="ArrowTailHeadValueLabel" Width="34" Margin="4,0,14,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="1.0" />
                                     <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Rounded tail" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <Slider x:Name="ArrowTailRoundnessSlider" Width="108" Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="5" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ArrowTailRoundnessSlider_ValueChanged" ToolTip="Rounded tail" />
-                                    <TextBlock x:Name="ArrowTailRoundnessValueLabel" Width="38" Margin="4,0,14,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="45%" />
+                                    <TextBlock x:Name="ArrowTailRoundnessValueLabel" Width="38" Margin="4,0,14,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="0%" />
                                     <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Rounded front" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <Slider x:Name="ArrowHeadRoundnessSlider" Width="108" Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="5" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ArrowHeadRoundnessSlider_ValueChanged" ToolTip="Rounded front" />
                                     <TextBlock x:Name="ArrowHeadRoundnessValueLabel" Width="38" Margin="4,0,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="0%" />
@@ -1134,10 +1174,67 @@
                                     <TextBlock x:Name="ArrowShadowValueLabel" Width="42" Margin="4,0,14,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="0%" />
                                     <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Border" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <Slider x:Name="ArrowBorderSlider" Width="140" Minimum="0" Maximum="12" SmallChange="0.25" LargeChange="1" TickFrequency="0.25" IsSnapToTickEnabled="False" VerticalAlignment="Center" ValueChanged="ArrowBorderSlider_ValueChanged" ToolTip="Border width" />
-                                    <TextBlock x:Name="ArrowBorderValueLabel" Width="42" Margin="4,0,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="0.0" />
+                                    <TextBlock x:Name="ArrowBorderValueLabel" Width="42" Margin="4,0,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" VerticalAlignment="Center" Text="2.0" />
                                 </StackPanel>
                             </StackPanel>
                             </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="ObjectScalePanel"
+                            Visibility="Collapsed"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            Margin="12"
+                            Padding="9,12"
+                            Panel.ZIndex="26"
+                            Background="{DynamicResource IslandBackgroundBrush}"
+                            BorderBrush="{DynamicResource IslandBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="24">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="34" ShadowDepth="12" Color="#CC000000" Opacity="0.46" />
+                        </Border.Effect>
+                        <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
+                            <TextBlock FontSize="11"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource IslandMutedTextBrush}"
+                                       Text="Size"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,0,0,8" />
+                            <Slider x:Name="ObjectScaleSlider"
+                                    Style="{StaticResource EditorVerticalSliderStyle}"
+                                    Orientation="Vertical"
+                                    Minimum="0.1"
+                                    Maximum="3.0"
+                                    SmallChange="0.05"
+                                    LargeChange="0.2"
+                                    TickFrequency="0.05"
+                                    IsSnapToTickEnabled="False"
+                                    HorizontalAlignment="Center"
+                                    ValueChanged="ObjectScaleSlider_ValueChanged"
+                                    ToolTip="Object size" />
+                            <TextBlock x:Name="ObjectScaleValueLabel"
+                                       Width="40"
+                                       Margin="0,8,0,8"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource IslandMutedTextBrush}"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center"
+                                       Text="100%" />
+                            <Button x:Name="ResetScaleButton"
+                                    Width="28"
+                                    Height="28"
+                                    Padding="0"
+                                    HorizontalAlignment="Center"
+                                    Click="ResetScaleButton_Click"
+                                    Background="{DynamicResource SecondaryButtonBrush}"
+                                    Foreground="{DynamicResource IslandTextBrush}"
+                                    BorderBrush="{DynamicResource SecondaryButtonBorderBrush}"
+                                    BorderThickness="1"
+                                    ToolTip="Reset object size to 100%">
+                                <TextBlock Style="{StaticResource EditorGlyphStyle}" FontSize="11" Margin="0" Text="&#xE72C;" />
+                            </Button>
                         </StackPanel>
                     </Border>
 

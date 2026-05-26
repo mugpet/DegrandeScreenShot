@@ -45,14 +45,17 @@ public partial class EditorWindow : Window
     internal const double DefaultHighlightShadowStrength = 0.00;
     internal const double DefaultHighlightBorderWidth = 0.00;
     internal const double DefaultArrowTailScale = 1.00;
-    internal const double DefaultArrowBodyScale = 0.20;
-    internal const double DefaultArrowFrontScale = 0.30;
-    internal const double DefaultArrowHeadScale = 0.40;
+    internal const double DefaultArrowBodyScale = 1.00;
+    internal const double DefaultArrowFrontScale = 1.00;
+    internal const double DefaultArrowHeadScale = 1.00;
     internal const double DefaultArrowTailHeadScale = 1.00;
-    internal const double DefaultArrowTailRoundness = 0.45;
+    internal const double DefaultArrowTailRoundness = 0.00;
     internal const double DefaultArrowHeadRoundness = 0.00;
     internal const double DefaultArrowShadowStrength = 0.00;
     internal const double DefaultArrowBorderWidth = 2.00;
+    private const double DefaultObjectSize = 1.00;
+    private const double MinObjectSize = 0.10;
+    private const double MaxObjectSize = 3.00;
     private const string WindowsThemeRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
     private const int DwmUseImmersiveDarkModeAttribute = 20;
     private const int DwmBorderColorAttribute = 34;
@@ -85,6 +88,7 @@ public partial class EditorWindow : Window
     private EditorTool _currentTool = EditorTool.Select;
     private TextAnnotation? _editingTextAnnotation;
     private Point? _dragStart;
+    private Point? _drawMoveLastPoint;
     private DragOperation _dragOperation = DragOperation.None;
     private CropHandle _activeCropHandle = CropHandle.None;
     private string? _activeHandle;
@@ -122,11 +126,11 @@ public partial class EditorWindow : Window
     private bool _lastArrowHasStartHead;
     private bool _lastArrowHasEndHead = true;
     private List<(double U, double V)> _lastArrowRelativeBendPoints = new();
-    private double _lastArrowScale = 1.0;
-    private double _lastShapeScale = 1.0;
-    private double _lastHighlightScale = 1.0;
-    private double _lastObscureScale = 1.0;
-    private double _lastTextScale = 1.0;
+    private double _lastArrowScale = DefaultObjectSize;
+    private double _lastShapeScale = DefaultObjectSize;
+    private double _lastHighlightScale = DefaultObjectSize;
+    private double _lastObscureScale = DefaultObjectSize;
+    private double _lastTextScale = DefaultObjectSize;
     private AnnotationBase? _dragOriginalAnnotation;
     private bool _hasDuplicatedDuringCurrentDrag;
     private readonly List<ArrowShapePresetPreference> _arrowShapePresets = [];
@@ -542,6 +546,7 @@ public partial class EditorWindow : Window
         }
 
         _dragStart = point;
+        _drawMoveLastPoint = null;
         AnnotationCanvas.CaptureMouse();
 
         if (TryBeginSelectedHandleInteraction(point))
@@ -618,7 +623,7 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Rectangle)
         {
             var annotation = new RectangleAnnotation { Bounds = new Rect(point, point) };
-            annotation.SetScale(_lastShapeScale);
+            ApplyLastUsedObjectSize(annotation);
             annotation.SetColor(_lastShapeColor);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
@@ -630,7 +635,7 @@ public partial class EditorWindow : Window
         if (_currentTool == EditorTool.Ellipse)
         {
             var annotation = new EllipseAnnotation { Bounds = new Rect(point, point) };
-            annotation.SetScale(_lastShapeScale);
+            ApplyLastUsedObjectSize(annotation);
             annotation.SetColor(_lastShapeColor);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
@@ -781,12 +786,7 @@ public partial class EditorWindow : Window
             _pendingDrawTool = null;
             if (_selectedAnnotation is not null)
             {
-                _selectedAnnotation.UpdateFromAnchor(_dragStart.Value, drawPoint, ShouldConstrainAspectRatio());
-                ClampSelectedObscureAnnotationToCanvas(preserveSize: false);
-                if (_selectedAnnotation is ArrowAnnotation deferredArrow)
-                {
-                    ApplyLastUsedArrowBendPoints(deferredArrow);
-                }
+                UpdateDrawingAnnotation(drawPoint, initializeBeforeMove: true);
             }
 
             RefreshCanvas();
@@ -846,12 +846,7 @@ public partial class EditorWindow : Window
         switch (_dragOperation)
         {
             case DragOperation.Draw:
-                _selectedAnnotation.UpdateFromAnchor(_dragStart.Value, point, ShouldConstrainAspectRatio());
-                ClampSelectedObscureAnnotationToCanvas(preserveSize: false);
-                if (_selectedAnnotation is ArrowAnnotation drawingArrow)
-                {
-                    ApplyLastUsedArrowBendPoints(drawingArrow);
-                }
+                UpdateDrawingAnnotation(point, initializeBeforeMove: false);
                 break;
             case DragOperation.Move:
                 if (!_hasDuplicatedDuringCurrentDrag && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control && _dragOriginalAnnotation is not null)
@@ -954,6 +949,7 @@ public partial class EditorWindow : Window
             var point = ToDocumentPoint(e.GetPosition(AnnotationCanvas));
             _pendingDrawTool = null;
             _dragStart = null;
+            _drawMoveLastPoint = null;
             _dragOperation = DragOperation.None;
             _activeCropHandle = CropHandle.None;
             _cropDragOrigin = null;
@@ -966,6 +962,7 @@ public partial class EditorWindow : Window
         }
 
         _dragStart = null;
+    _drawMoveLastPoint = null;
         var shouldCommitHistory = _dragOperation is DragOperation.Draw or DragOperation.Move or DragOperation.Handle or DragOperation.CropCreate or DragOperation.CropMove or DragOperation.CropResize;
         var capturedOperation = _dragOperation;
         _dragOperation = DragOperation.None;
@@ -1281,37 +1278,17 @@ public partial class EditorWindow : Window
             return;
         }
 
-        var scalePercent = Math.Round(e.NewValue * 100);
-        ObjectScaleValueLabel.Text = $"{(int)scalePercent}%";
+        var objectSize = ClampObjectSize(e.NewValue);
+        UpdateObjectSizeLabel(objectSize);
         if (_isUpdatingObjectScale || _contextMenuAnnotation is not AnnotationBase annotation)
         {
             return;
         }
 
-        annotation.SetScale(e.NewValue);
+        annotation.SetScale(objectSize);
+        RememberObjectSizeDefault(annotation, objectSize, clearArrowPreset: true);
 
-        // Save default scale for future objects of this type
-        if (annotation is ArrowAnnotation)
-        {
-            _lastArrowScale = e.NewValue;
-        }
-        else if (annotation is TextAnnotation)
-        {
-            _lastTextScale = e.NewValue;
-        }
-        else if (annotation is HighlightAnnotation)
-        {
-            _lastHighlightScale = e.NewValue;
-        }
-        else if (annotation is ObscureAnnotation)
-        {
-            _lastObscureScale = e.NewValue;
-        }
-        else if (annotation is RectangleAnnotation or EllipseAnnotation)
-        {
-            _lastShapeScale = e.NewValue;
-        }
-
+        PersistEditorPreferences();
         CommitHistoryState();
         RefreshCanvas();
     }
@@ -1321,35 +1298,97 @@ public partial class EditorWindow : Window
         if (_contextMenuAnnotation is AnnotationBase annotation)
         {
             _isUpdatingObjectScale = true;
-            ObjectScaleSlider.Value = 1.0;
+            ObjectScaleSlider.Value = DefaultObjectSize;
             _isUpdatingObjectScale = false;
-            annotation.ResetScale();
+            ResetObjectSizeToDefault(annotation);
 
-            // Save default scale as 1.0
-            if (annotation is ArrowAnnotation)
-            {
-                _lastArrowScale = 1.0;
-            }
-            else if (annotation is TextAnnotation)
-            {
-                _lastTextScale = 1.0;
-            }
-            else if (annotation is HighlightAnnotation)
-            {
-                _lastHighlightScale = 1.0;
-            }
-            else if (annotation is ObscureAnnotation)
-            {
-                _lastObscureScale = 1.0;
-            }
-            else if (annotation is RectangleAnnotation or EllipseAnnotation)
-            {
-                _lastShapeScale = 1.0;
-            }
-
+            PersistEditorPreferences();
             CommitHistoryState();
             RefreshCanvas();
+            UpdateSelectionAnnotationControls(annotation);
+            UpdateSelectionActionIsland();
         }
+    }
+
+    private static double ClampObjectSize(double size)
+    {
+        return Math.Clamp(size, MinObjectSize, MaxObjectSize);
+    }
+
+    private void UpdateObjectSizeLabel(double size)
+    {
+        var sizePercent = Math.Round(ClampObjectSize(size) * 100);
+        ObjectScaleValueLabel.Text = $"{(int)sizePercent}%";
+    }
+
+    private void ApplyLastUsedObjectSize(AnnotationBase annotation)
+    {
+        annotation.SetScale(GetLastUsedObjectSize(annotation));
+    }
+
+    private double GetLastUsedObjectSize(AnnotationBase annotation)
+    {
+        return annotation switch
+        {
+            ArrowAnnotation => _lastArrowScale,
+            TextAnnotation => _lastTextScale,
+            HighlightAnnotation => _lastHighlightScale,
+            ObscureAnnotation => _lastObscureScale,
+            RectangleAnnotation or EllipseAnnotation => _lastShapeScale,
+            _ => DefaultObjectSize,
+        };
+    }
+
+    private void RememberObjectSizeDefault(AnnotationBase annotation, double size, bool clearArrowPreset)
+    {
+        var objectSize = ClampObjectSize(size);
+        switch (annotation)
+        {
+            case ArrowAnnotation:
+                _lastArrowScale = objectSize;
+                if (clearArrowPreset)
+                {
+                    ClearSelectedArrowPreset();
+                    UpdateArrowPresetButtonLabel();
+                }
+                break;
+            case TextAnnotation:
+                _lastTextScale = objectSize;
+                break;
+            case HighlightAnnotation:
+                _lastHighlightScale = objectSize;
+                break;
+            case ObscureAnnotation:
+                _lastObscureScale = objectSize;
+                break;
+            case RectangleAnnotation or EllipseAnnotation:
+                _lastShapeScale = objectSize;
+                break;
+        }
+    }
+
+    private void ResetObjectSizeToDefault(AnnotationBase annotation)
+    {
+        annotation.ResetScale();
+        switch (annotation)
+        {
+            case ArrowAnnotation arrow:
+                arrow.ResetVisualSizeToDefaults();
+                _lastArrowTailScale = DefaultArrowTailScale;
+                _lastArrowBodyScale = DefaultArrowBodyScale;
+                _lastArrowFrontScale = DefaultArrowFrontScale;
+                _lastArrowHeadScale = DefaultArrowHeadScale;
+                _lastArrowTailHeadScale = DefaultArrowTailHeadScale;
+                ClearSelectedArrowPreset();
+                UpdateArrowPresetButtonLabel();
+                break;
+            case TextAnnotation text:
+                text.ResetVisualSizeToDefaults();
+                _lastTextFontSize = DefaultTextFontSize;
+                break;
+        }
+
+        RememberObjectSizeDefault(annotation, DefaultObjectSize, clearArrowPreset: annotation is not ArrowAnnotation);
     }
 
     private void ResetAnnotation_Click(object sender, RoutedEventArgs e)
@@ -1369,7 +1408,7 @@ public partial class EditorWindow : Window
 
     private void ResetAnnotationToDefaults(AnnotationBase annotation)
     {
-        annotation.ResetScale();
+        ResetObjectSizeToDefault(annotation);
         switch (annotation)
         {
             case RectangleAnnotation rectangle:
@@ -1536,6 +1575,13 @@ public partial class EditorWindow : Window
         }
 
         var modifiers = Keyboard.Modifiers;
+        if (e.Key == Key.Escape && _selectedAnnotation is not null && _editingTextAnnotation is null)
+        {
+            DeselectSelectedAnnotation();
+            e.Handled = true;
+            return;
+        }
+
         if (modifiers.HasFlag(ModifierKeys.Control) && e.Key == Key.Z)
         {
             if (modifiers.HasFlag(ModifierKeys.Shift))
@@ -1592,6 +1638,16 @@ public partial class EditorWindow : Window
         CommitHistoryState();
         RefreshCanvas();
         e.Handled = true;
+    }
+
+    private void DeselectSelectedAnnotation()
+    {
+        _selectedAnnotation = null;
+        _hoveredAnnotation = null;
+        _contextMenuAnnotation = null;
+        UpdateSelectionAnnotationControls(null);
+        UpdateSelectionActionIsland();
+        RefreshCanvas();
     }
 
     private void DuplicateSelectedAnnotation()
@@ -1919,8 +1975,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetTailScale(e.NewValue);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowBodySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1934,8 +1992,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetBodyScale(e.NewValue);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowFrontSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1949,8 +2009,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetFrontScale(e.NewValue);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowHeadSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1964,8 +2026,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetHeadScale(e.NewValue);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowTailHeadSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1979,8 +2043,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetTailHeadScale(e.NewValue);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowTailRoundnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1994,8 +2060,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetTailRoundness(_lastArrowTailRoundness);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowHeadRoundnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -2009,8 +2077,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetHeadRoundness(_lastArrowHeadRoundness);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowShadowSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -2024,8 +2094,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetShadowStrength(_lastArrowShadowStrength);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowBorderSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -2039,8 +2111,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetBorderWidth(_lastArrowBorderWidth);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowHeadToggleButton_Checked(object sender, RoutedEventArgs e)
@@ -2056,8 +2130,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetEndHeadEnabled(_lastArrowHasEndHead);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowTailToggleButton_Checked(object sender, RoutedEventArgs e)
@@ -2073,8 +2149,10 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation arrow)
         {
             arrow.SetStartHeadEnabled(_lastArrowHasStartHead);
+            CommitHistoryState();
             RefreshCanvas();
         }
+        PersistEditorPreferences();
     }
 
     private void ArrowPresetButton_Click(object sender, RoutedEventArgs e)
@@ -2385,7 +2463,7 @@ public partial class EditorWindow : Window
                 TailRoundness: arrow.TailRoundness,
                 HeadRoundness: arrow.HeadRoundness,
                 BendPoints: CreateRelativeArrowPresetPoints(arrow),
-                Scale: arrow.Scale);
+                Scale: ClampObjectSize(arrow.Scale));
         }
 
         return new ArrowShapePresetPreference(
@@ -2408,7 +2486,7 @@ public partial class EditorWindow : Window
     private void ApplyArrowPreset(ArrowShapePresetPreference preset)
     {
         _selectedArrowPresetId = preset.Id;
-        _lastArrowScale = preset.Scale ?? 1.0;
+        _lastArrowScale = ClampObjectSize(preset.Scale ?? DefaultObjectSize);
         _lastArrowTailScale = Math.Clamp(preset.TailScale, 0.15, 3.0);
         _lastArrowBodyScale = Math.Clamp(preset.BodyScale, 0.15, 3.0);
         _lastArrowFrontScale = Math.Clamp(preset.FrontScale, 0.15, 3.0);
@@ -2447,7 +2525,7 @@ public partial class EditorWindow : Window
     {
         var arrow = ArrowAnnotation.Create(new Point(4, 33));
         arrow.End = new Point(104, 33);
-        arrow.SetScale(preset.Scale ?? 1.0);
+        arrow.SetScale(ClampObjectSize(preset.Scale ?? DefaultObjectSize));
         arrow.SetTailScale(preset.TailScale);
         arrow.SetBodyScale(preset.BodyScale);
         arrow.SetFrontScale(preset.FrontScale);
@@ -2576,9 +2654,9 @@ public partial class EditorWindow : Window
         _isUpdatingObjectScale = true;
         try
         {
-            var scalePercent = Math.Round(annotation.Scale * 100);
-            ObjectScaleSlider.Value = annotation.Scale;
-            ObjectScaleValueLabel.Text = $"{(int)scalePercent}%";
+            var objectSize = ClampObjectSize(annotation.Scale);
+            ObjectScaleSlider.Value = objectSize;
+            UpdateObjectSizeLabel(objectSize);
         }
         finally
         {
@@ -2673,7 +2751,7 @@ public partial class EditorWindow : Window
             case EditorTool.Rectangle:
             {
                 var annotation = new RectangleAnnotation { Bounds = new Rect(point, point) };
-                annotation.SetScale(_lastShapeScale);
+                ApplyLastUsedObjectSize(annotation);
                 annotation.SetColor(_lastShapeColor);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
@@ -2683,7 +2761,7 @@ public partial class EditorWindow : Window
             case EditorTool.Ellipse:
             {
                 var annotation = new EllipseAnnotation { Bounds = new Rect(point, point) };
-                annotation.SetScale(_lastShapeScale);
+                ApplyLastUsedObjectSize(annotation);
                 annotation.SetColor(_lastShapeColor);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
@@ -2725,19 +2803,19 @@ public partial class EditorWindow : Window
 
     private void ApplyLastUsedTextStyle(TextAnnotation textAnnotation)
     {
-        textAnnotation.SetScale(_lastTextScale);
         textAnnotation.SetColor(_lastTextColor);
         textAnnotation.SetFontSize(_lastTextFontSize);
         textAnnotation.SetBackgroundOpacity(_lastTextBackgroundOpacity);
         textAnnotation.SetBackgroundColorStrength(_lastTextBackgroundStrength);
         textAnnotation.SetTextAlignment(_lastTextAlignment);
         textAnnotation.SetBold(_lastTextIsBold);
+        ApplyLastUsedObjectSize(textAnnotation);
     }
 
     private void ApplyLastUsedArrowStyle(ArrowAnnotation arrowAnnotation)
     {
         arrowAnnotation.SetStyle(ArrowStyle.BrushStroke);
-        arrowAnnotation.SetScale(_lastArrowScale);
+        ApplyLastUsedObjectSize(arrowAnnotation);
         arrowAnnotation.SetTailScale(_lastArrowTailScale);
         arrowAnnotation.SetBodyScale(_lastArrowBodyScale);
         arrowAnnotation.SetFrontScale(_lastArrowFrontScale);
@@ -2754,7 +2832,7 @@ public partial class EditorWindow : Window
 
     private void ApplyLastUsedHighlightStyle(HighlightAnnotation highlightAnnotation)
     {
-        highlightAnnotation.SetScale(_lastHighlightScale);
+        ApplyLastUsedObjectSize(highlightAnnotation);
         highlightAnnotation.SetColor(_lastHighlightColor);
         highlightAnnotation.SetColorStrength(_lastHighlightStrength);
     }
@@ -2785,7 +2863,7 @@ public partial class EditorWindow : Window
 
     private void CaptureArrowDefaults(ArrowAnnotation arrow, bool preserveSelectedPreset = false)
     {
-        _lastArrowScale = arrow.Scale;
+        _lastArrowScale = ClampObjectSize(arrow.Scale);
         _lastArrowColor = arrow.StrokeColor;
         _lastArrowStyle = arrow.Style;
         _lastArrowTailScale = arrow.TailScale;
@@ -2810,7 +2888,7 @@ public partial class EditorWindow : Window
 
     private void ApplyLastUsedObscureStyle(ObscureAnnotation obscureAnnotation)
     {
-        obscureAnnotation.SetScale(_lastObscureScale);
+        ApplyLastUsedObjectSize(obscureAnnotation);
         obscureAnnotation.SetColor(_lastObscureColor);
         obscureAnnotation.SetBlurLevel(_lastObscureBlurLevel);
         obscureAnnotation.SetPixelationLevel(_lastObscurePixelationLevel);
@@ -2911,7 +2989,65 @@ public partial class EditorWindow : Window
     {
         return Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)
             && (_selectedAnnotation is RectangleAnnotation or EllipseAnnotation or ObscureAnnotation
-                or HighlightAnnotation { Mode: HighlightMode.Region });
+                or ArrowAnnotation
+                or HighlightAnnotation { Mode: HighlightMode.Region or HighlightMode.Line });
+    }
+
+    private bool ShouldMoveWhileDrawing()
+    {
+        return Keyboard.Modifiers.HasFlag(ModifierKeys.Control)
+            && (_selectedAnnotation is RectangleAnnotation or EllipseAnnotation or ArrowAnnotation
+                or HighlightAnnotation { Mode: HighlightMode.Line });
+    }
+
+    private void UpdateDrawingAnnotation(Point point, bool initializeBeforeMove)
+    {
+        if (_dragStart is not { } anchor || _selectedAnnotation is null)
+        {
+            return;
+        }
+
+        if (ShouldMoveWhileDrawing())
+        {
+            if (initializeBeforeMove && _drawMoveLastPoint is null)
+            {
+                ResizeDrawingAnnotation(anchor, point);
+                _drawMoveLastPoint = point;
+                return;
+            }
+
+            if (_drawMoveLastPoint is not { } lastPoint)
+            {
+                _drawMoveLastPoint = point;
+                return;
+            }
+
+            var delta = point - lastPoint;
+            _selectedAnnotation.Move(delta);
+            _dragStart = anchor + delta;
+            _drawMoveLastPoint = point;
+            ClampSelectedObscureAnnotationToCanvas(preserveSize: true);
+            return;
+        }
+
+        _drawMoveLastPoint = null;
+        ResizeDrawingAnnotation(anchor, point);
+    }
+
+    private void ResizeDrawingAnnotation(Point anchor, Point point)
+    {
+        if (_selectedAnnotation is null)
+        {
+            return;
+        }
+
+        var shouldConstrain = ShouldConstrainAspectRatio();
+        _selectedAnnotation.UpdateFromAnchor(anchor, point, shouldConstrain);
+        ClampSelectedObscureAnnotationToCanvas(preserveSize: false);
+        if (!shouldConstrain && _selectedAnnotation is ArrowAnnotation arrow)
+        {
+            ApplyLastUsedArrowBendPoints(arrow);
+        }
     }
 
     private void ApplyWorkingImage(BitmapSource bitmapSource)
@@ -4001,6 +4137,11 @@ public partial class EditorWindow : Window
         _selectedArrowPresetId = _arrowShapePresets.Any(candidate => string.Equals(candidate.Id, preferences.SelectedArrowPresetId, StringComparison.Ordinal))
             ? preferences.SelectedArrowPresetId
             : null;
+        _lastShapeScale = ClampObjectSize(preferences.ShapeScale ?? DefaultObjectSize);
+        _lastArrowScale = ClampObjectSize(preferences.ArrowScale ?? DefaultObjectSize);
+        _lastTextScale = ClampObjectSize(preferences.TextScale ?? DefaultObjectSize);
+        _lastHighlightScale = ClampObjectSize(preferences.HighlightScale ?? DefaultObjectSize);
+        _lastObscureScale = ClampObjectSize(preferences.ObscureScale ?? DefaultObjectSize);
         _lastArrowTailScale = Math.Clamp(preferences.ArrowTailScale ?? DefaultArrowTailScale, 0.15, 3.0);
         _lastArrowBodyScale = Math.Clamp(preferences.ArrowBodyScale ?? DefaultArrowBodyScale, 0.15, 3.0);
         _lastArrowFrontScale = Math.Clamp(preferences.ArrowFrontScale ?? DefaultArrowFrontScale, 0.15, 3.0);
@@ -4012,6 +4153,15 @@ public partial class EditorWindow : Window
         _lastArrowHasStartHead = preferences.ArrowHasStartHead == true;
         _lastArrowHasEndHead = preferences.ArrowHasEndHead ?? true;
         _lastArrowTailHeadScale = Math.Clamp(preferences.ArrowTailHeadScale ?? DefaultArrowTailHeadScale, 0.2, 1.6);
+        if (_selectedArrowPresetId is null && IsLegacyArrowDefaultPreference(preferences))
+        {
+            _lastArrowBodyScale = DefaultArrowBodyScale;
+            _lastArrowFrontScale = DefaultArrowFrontScale;
+            _lastArrowHeadScale = DefaultArrowHeadScale;
+            _lastArrowTailRoundness = DefaultArrowTailRoundness;
+            _lastArrowBorderWidth = DefaultArrowBorderWidth;
+        }
+
         if (_selectedArrowPresetId is { } selectedPresetId)
         {
             var selectedPreset = _arrowShapePresets.First(candidate => string.Equals(candidate.Id, selectedPresetId, StringComparison.Ordinal));
@@ -4026,6 +4176,7 @@ public partial class EditorWindow : Window
             _lastArrowBorderWidth = selectedPreset.BorderWidth;
             _lastArrowHasStartHead = selectedPreset.HasStartHead == true;
             _lastArrowHasEndHead = selectedPreset.HasEndHead ?? true;
+            _lastArrowScale = ClampObjectSize(selectedPreset.Scale ?? _lastArrowScale);
             _lastArrowRelativeBendPoints = (selectedPreset.BendPoints ?? [])
                 .Select(point => (point.U, point.V))
                 .ToList();
@@ -4062,6 +4213,24 @@ public partial class EditorWindow : Window
             : savedLightenLevel;
     }
 
+    private static bool IsLegacyArrowDefaultPreference(EditorPreferences preferences)
+    {
+        return IsClose(preferences.ArrowTailScale, 1.00)
+            && IsClose(preferences.ArrowBodyScale, 0.20)
+            && IsClose(preferences.ArrowFrontScale, 0.30)
+            && IsClose(preferences.ArrowHeadScale, 0.40)
+            && IsClose(preferences.ArrowTailHeadScale, 1.00)
+            && IsClose(preferences.ArrowTailRoundness, 0.45)
+            && IsClose(preferences.ArrowHeadRoundness, 0.00)
+            && IsClose(preferences.ArrowShadowStrength, 0.00)
+            && IsClose(preferences.ArrowBorderWidth, 0.00)
+            && preferences.ArrowHasStartHead != true
+            && (preferences.ArrowHasEndHead ?? true);
+
+        static bool IsClose(double? value, double expected) =>
+            value is { } actual && Math.Abs(actual - expected) < 0.001;
+    }
+
     private void PersistEditorPreferences()
     {
         _preferencesStore.Save(new EditorPreferences(
@@ -4071,6 +4240,11 @@ public partial class EditorWindow : Window
             ArrowStyle: _lastArrowStyle.ToString(),
             ArrowShapePresets: _arrowShapePresets.Select(NormalizeArrowPreset).ToList(),
             SelectedArrowPresetId: _selectedArrowPresetId,
+            ShapeScale: _lastShapeScale,
+            ArrowScale: _lastArrowScale,
+            TextScale: _lastTextScale,
+            HighlightScale: _lastHighlightScale,
+            ObscureScale: _lastObscureScale,
             ArrowTailScale: _lastArrowTailScale,
             ArrowBodyScale: _lastArrowBodyScale,
             ArrowFrontScale: _lastArrowFrontScale,
@@ -4125,7 +4299,7 @@ public partial class EditorWindow : Window
             BendPoints: (preset.BendPoints ?? [])
                 .Select(point => new ArrowPresetPointPreference(point.U, point.V))
                 .ToList(),
-            Scale: preset.Scale ?? 1.0);
+            Scale: ClampObjectSize(preset.Scale ?? DefaultObjectSize));
     }
 
     private enum ThemePreference
@@ -4337,6 +4511,21 @@ internal abstract class AnnotationBase
     public virtual void ResetScale()
     {
         SetScale(1.0);
+    }
+
+    protected static Point SnapLinePointToNearest45Degrees(Point anchor, Point point)
+    {
+        var delta = point - anchor;
+        var length = delta.Length;
+        if (length < 0.001)
+        {
+            return point;
+        }
+
+        var snappedAngle = Math.Round(Math.Atan2(delta.Y, delta.X) / (Math.PI / 4)) * (Math.PI / 4);
+        return new Point(
+            anchor.X + (Math.Cos(snappedAngle) * length),
+            anchor.Y + (Math.Sin(snappedAngle) * length));
     }
 
     protected abstract void ScaleGeometricPoints(double relativeScale);
@@ -4937,6 +5126,17 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
     public void SetBoxWidth(double width)
     {
         BoxWidth = Math.Max(MinBoxWidth, width);
+    }
+
+    public void ResetVisualSizeToDefaults()
+    {
+        var size = MeasureBounds();
+        var center = new Point(Location.X + size.Width / 2, Location.Y + size.Height / 2);
+        Scale = 1.0;
+        SetFontSize(EditorWindow.DefaultTextFontSize);
+        SetBoxWidth(DefaultBoxWidth);
+        var newSize = MeasureBounds();
+        Location = new Point(center.X - newSize.Width / 2, center.Y - newSize.Height / 2);
     }
 
     public void SetBackgroundOpacity(double opacity)
@@ -5829,11 +6029,11 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
             case HighlightMode.Line when Points.Count >= 2:
                 if (handle == "Start")
                 {
-                    Points[0] = point;
+                    Points[0] = constrainToSquare ? SnapLinePointToNearest45Degrees(Points[^1], point) : point;
                 }
                 else if (handle == "End")
                 {
-                    Points[^1] = point;
+                    Points[^1] = constrainToSquare ? SnapLinePointToNearest45Degrees(Points[0], point) : point;
                 }
                 break;
         }
@@ -5847,18 +6047,19 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
                 Bounds = CreateRectFromPoints(anchor, current, constrainToSquare);
                 break;
             case HighlightMode.Line:
+                var lineEnd = constrainToSquare ? SnapLinePointToNearest45Degrees(anchor, current) : current;
                 if (Points.Count == 0)
                 {
                     Points.Add(anchor);
                 }
                 if (Points.Count == 1)
                 {
-                    Points.Add(current);
+                    Points.Add(lineEnd);
                 }
                 else
                 {
                     Points[0] = anchor;
-                    Points[^1] = current;
+                    Points[^1] = lineEnd;
                 }
                 break;
             case HighlightMode.Freehand:
@@ -6100,6 +6301,23 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
     public void SetStartHeadEnabled(bool value) => HasStartHead = value;
 
     public void SetEndHeadEnabled(bool value) => HasEndHead = value;
+
+    public void ResetVisualSizeToDefaults()
+    {
+        Scale = 1.0;
+        ShaftThickness = DefaultShaftThickness;
+        HeadLength = DefaultHeadLength;
+        HeadWidth = DefaultHeadWidth;
+        OuterEdgeWidth = DefaultOuterEdgeWidth;
+        InnerEdgeWidth = DefaultInnerEdgeWidth;
+        TailSweep = DefaultTailSweep;
+        HeadSkew = DefaultHeadSkew;
+        TailScale = EditorWindow.DefaultArrowTailScale;
+        BodyScale = EditorWindow.DefaultArrowBodyScale;
+        FrontScale = EditorWindow.DefaultArrowFrontScale;
+        HeadScale = EditorWindow.DefaultArrowHeadScale;
+        TailHeadScale = EditorWindow.DefaultArrowTailHeadScale;
+    }
 
     public static ArrowAnnotation Create(Point point)
     {
@@ -6343,10 +6561,10 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
         switch (handle)
         {
             case "Start":
-                Start = point;
+                Start = constrainToSquare ? SnapLinePointToNearest45Degrees(End, point) : point;
                 break;
             case "End":
-                End = point;
+                End = constrainToSquare ? SnapLinePointToNearest45Degrees(Start, point) : point;
                 break;
             default:
                 if (handle.StartsWith("Bend:", StringComparison.Ordinal)
@@ -6362,18 +6580,8 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
     public override void UpdateFromAnchor(Point anchor, Point current, bool constrainToSquare)
     {
         Start = anchor;
-        End = current;
+        End = constrainToSquare ? SnapLinePointToNearest45Degrees(anchor, current) : current;
         BendPoints.Clear();
-        var delta = current - anchor;
-
-        var length = Math.Max(1, delta.Length);
-        ShaftThickness = Math.Clamp(length * 0.11, MinShaftThickness, 24);
-        HeadLength = Math.Clamp(length * 0.32, 22, 68);
-        HeadWidth = Math.Clamp(length * 0.22, 16, 54);
-        OuterEdgeWidth = Math.Clamp(length * 0.34, 18, 86);
-        InnerEdgeWidth = Math.Clamp(length * 0.08, 3, 22);
-        TailSweep = Math.Clamp(length * 0.36, MinTailSweep, MaxTailSweep);
-        HeadSkew = 0;
     }
 
     public override void SetColor(Color color)
@@ -6388,47 +6596,13 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
 
     protected override void ScaleGeometricPoints(double relativeScale)
     {
-        var allPoints = new List<Point> { Start, End };
-        allPoints.AddRange(BendPoints);
-
-        double minX = double.MaxValue;
-        double maxX = double.MinValue;
-        double minY = double.MaxValue;
-        double maxY = double.MinValue;
-
-        foreach (var pt in allPoints)
-        {
-            if (pt.X < minX) minX = pt.X;
-            if (pt.X > maxX) maxX = pt.X;
-            if (pt.Y < minY) minY = pt.Y;
-            if (pt.Y > maxY) maxY = pt.Y;
-        }
-
-        var center = new Point(minX + (maxX - minX) / 2, minY + (maxY - minY) / 2);
-
-        Start = new Point(
-            center.X + (Start.X - center.X) * relativeScale,
-            center.Y + (Start.Y - center.Y) * relativeScale
-        );
-        End = new Point(
-            center.X + (End.X - center.X) * relativeScale,
-            center.Y + (End.Y - center.Y) * relativeScale
-        );
-
-        for (int i = 0; i < BendPoints.Count; i++)
-        {
-            var pt = BendPoints[i];
-            BendPoints[i] = new Point(
-                center.X + (pt.X - center.X) * relativeScale,
-                center.Y + (pt.Y - center.Y) * relativeScale
-            );
-        }
-
         ShaftThickness = Math.Clamp(ShaftThickness * relativeScale, MinShaftThickness, MaxShaftThickness);
         HeadLength = Math.Clamp(HeadLength * relativeScale, MinHeadLength, MaxHeadLength);
         HeadWidth = Math.Clamp(HeadWidth * relativeScale, MinHeadWidth, MaxHeadWidth);
         OuterEdgeWidth = Math.Clamp(OuterEdgeWidth * relativeScale, MinEdgeWidth, MaxEdgeWidth);
         InnerEdgeWidth = Math.Clamp(InnerEdgeWidth * relativeScale, MinEdgeWidth, MaxEdgeWidth);
+        TailSweep = Math.Clamp(TailSweep * relativeScale, MinTailSweep, MaxTailSweep);
+        HeadSkew = Math.Clamp(HeadSkew * relativeScale, MinHeadSkew, MaxHeadSkew);
     }
 
     public override AnnotationBase Clone()
@@ -6572,7 +6746,7 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
         //        -> headLeftBarb -> tip -> headRightBarb -> shaftRightBase
         //        -> ... centerline right edge (reversed) ... -> tailRight -> close
         //
-        // Sizing is proportional to total length so the head is always visible relative to the shaft.
+        // Dimensions come from the arrow size controls and are clamped so very short arrows stay readable.
 
         var totalLength = Math.Max(1.0, GetApproximateLength());
 

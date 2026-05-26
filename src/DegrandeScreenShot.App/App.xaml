@@ -12,7 +12,7 @@
         <Color x:Key="MutedTextColor">#6C7987</Color>
         <Color x:Key="CanvasColor">#ECF1F6</Color>
         <Color x:Key="SelectionStrokeColor">#FF1AA9D8</Color>
-        <Color x:Key="OverlayDimColor">#21000000</Color>
+        <Color x:Key="OverlayDimColor">#66000000</Color>
 
         <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
         <SolidColorBrush x:Key="PanelBrush" Color="{StaticResource PanelColor}" />
