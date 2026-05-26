@@ -41,19 +41,56 @@ public partial class CaptureOverlayWindow : Window
     private readonly CaptureLaunchMode _launchMode;
     private readonly CaptureSelectionMode _selectionMode;
     private readonly ScreenCaptureService _screenCaptureService = new();
-    private readonly SelectionSession _selectionSession = new();
-    private BitmapSource? _capturedSelection;
-    private PixelRect? _capturedSelectionBounds;
-    private CaptureTargetSelection? _hoveredTarget;
-    private CaptureTargetSelection? _pressedTarget;
     private byte[]? _desktopBgraPixels;
     private int _desktopBgraStride;
     private readonly Dictionary<IntPtr, IReadOnlyList<PixelRect>> _browserScrollRegionsByWindow = new();
-    private readonly LowLevelKeyboardProc _escapeKeyboardProc;
-    private IntPtr _escapeKeyboardHook;
     private bool _isCancelling;
     private double _dpiScaleX = 1.0;
     private double _dpiScaleY = 1.0;
+
+    private static readonly SelectionSession _selectionSession = new();
+    private static System.Threading.Tasks.TaskCompletionSource<CaptureOverlayWindow?> _captureTcs = new();
+    private static LowLevelKeyboardProc? _escapeKeyboardProcStatic;
+    private static IntPtr _escapeKeyboardHookStatic = IntPtr.Zero;
+
+    private CaptureTargetSelection? _hoveredTarget;
+    private CaptureTargetSelection? _pressedTarget;
+    private BitmapSource? _capturedSelection;
+    private PixelRect? _capturedSelectionBounds;
+
+    public CaptureResult? CaptureResult { get; private set; }
+    public WindowSelection? SelectedWindow { get; private set; }
+    public CaptureTargetSelection? SelectedScrollTarget { get; private set; }
+
+    /// <summary>
+    /// Forces the window to cover the entire virtual desktop using Win32 SetWindowPos.
+    /// This bypasses WPF's DPI-aware positioning to use physical pixel coordinates directly.
+    /// </summary>
+    private void ForceWindowToVirtualDesktop()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+
+        SetWindowPos(hwnd, HwndTopmost,
+            _captureFrame.VirtualLeft, _captureFrame.VirtualTop,
+            _captureFrame.Width, _captureFrame.Height,
+            SwpNoActivate);
+    }
+
+    /// <summary>
+    /// Updates internal content layout to match the current DPI without changing window position/size.
+    /// Window position/size is managed exclusively by ForceWindowToVirtualDesktop via Win32.
+    /// </summary>
+    private void UpdateContentLayout()
+    {
+        OverlayCanvas.Width = _captureFrame.Width / _dpiScaleX;
+        OverlayCanvas.Height = _captureFrame.Height / _dpiScaleY;
+
+        FrozenDesktopImage.Width = _captureFrame.Width / _dpiScaleX;
+        FrozenDesktopImage.Height = _captureFrame.Height / _dpiScaleY;
+        Canvas.SetLeft(FrozenDesktopImage, 0);
+        Canvas.SetTop(FrozenDesktopImage, 0);
+    }
 
     public CaptureOverlayWindow(
         CaptureFrame captureFrame,
@@ -61,26 +98,17 @@ public partial class CaptureOverlayWindow : Window
         CaptureSelectionMode selectionMode = CaptureSelectionMode.WindowOrRegion)
     {
         InitializeComponent();
-        _escapeKeyboardProc = EscapeKeyboardHookCallback;
         _captureFrame = captureFrame;
         _launchMode = launchMode;
         _selectionMode = selectionMode;
 
-        // Pre-scale coordinates to prevent double-sizing and visual layout flickering on creation
-        var dpi = VisualTreeHelper.GetDpi(this);
-        _dpiScaleX = dpi.DpiScaleX;
-        _dpiScaleY = dpi.DpiScaleY;
-
-        Left = captureFrame.VirtualLeft / _dpiScaleX;
-        Top = captureFrame.VirtualTop / _dpiScaleY;
-        Width = captureFrame.Width / _dpiScaleX;
-        Height = captureFrame.Height / _dpiScaleY;
+        var primaryBounds = Forms.Screen.PrimaryScreen?.Bounds;
+        Left = primaryBounds?.Left ?? 0;
+        Top = primaryBounds?.Top ?? 0;
+        Width = 1;
+        Height = 1;
 
         FrozenDesktopImage.Source = captureFrame.Bitmap;
-        FrozenDesktopImage.Width = captureFrame.Width / _dpiScaleX;
-        FrozenDesktopImage.Height = captureFrame.Height / _dpiScaleY;
-        Canvas.SetLeft(FrozenDesktopImage, 0);
-        Canvas.SetTop(FrozenDesktopImage, 0);
 
         Loaded += CaptureOverlayWindow_Loaded;
         Closed += CaptureOverlayWindow_Closed;
@@ -91,44 +119,114 @@ public partial class CaptureOverlayWindow : Window
         MouseLeftButtonUp += CaptureOverlayWindow_MouseLeftButtonUp;
     }
 
-    public CaptureResult? CaptureResult { get; private set; }
+    public static async System.Threading.Tasks.Task<CaptureOverlayResult> ShowOverlayAsync(
+        CaptureFrame captureFrame,
+        CaptureLaunchMode launchMode = CaptureLaunchMode.ChooseAction,
+        CaptureSelectionMode selectionMode = CaptureSelectionMode.WindowOrRegion)
+    {
+        _captureTcs = new System.Threading.Tasks.TaskCompletionSource<CaptureOverlayWindow?>();
+        _selectionSession.Clear();
 
-    public WindowSelection? SelectedWindow { get; private set; }
+        var shouldRestoreCursor = GetCursorPos(out var originalCursor);
+        if (TryGetPrimaryScreenCenter() is { } primaryCenter)
+        {
+            SetCursorPos(primaryCenter.X, primaryCenter.Y);
+        }
 
-    public CaptureTargetSelection? SelectedScrollTarget { get; private set; }
+        CaptureOverlayWindow overlay;
+        try
+        {
+            overlay = new CaptureOverlayWindow(captureFrame, launchMode, selectionMode);
+            overlay.Show();
+        }
+        finally
+        {
+            if (shouldRestoreCursor)
+            {
+                SetCursorPos(originalCursor.X, originalCursor.Y);
+            }
+        }
+
+        var completedOverlay = await _captureTcs.Task;
+
+        try { overlay.Close(); } catch { }
+
+        if (completedOverlay is null)
+        {
+            return new CaptureOverlayResult(false, null, null, null);
+        }
+
+        return new CaptureOverlayResult(
+            true,
+            completedOverlay.CaptureResult,
+            completedOverlay.SelectedWindow,
+            completedOverlay.SelectedScrollTarget);
+    }
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
 
+        // Hook the window procedure to intercept WM_DPICHANGED before WPF handles it.
+        // WPF's default WM_DPICHANGED handler resizes the window to the "suggested rect"
+        // from Windows, which is sized for a single monitor — breaking our multi-monitor span.
+        var hwndSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+        hwndSource?.AddHook(WndProc);
+
+        // Force window to span the full virtual desktop using Win32 (physical pixel coordinates)
+        ForceWindowToVirtualDesktop();
+
         var dpi = VisualTreeHelper.GetDpi(this);
         _dpiScaleX = dpi.DpiScaleX;
         _dpiScaleY = dpi.DpiScaleY;
 
-        Left = _captureFrame.VirtualLeft / _dpiScaleX;
-        Top = _captureFrame.VirtualTop / _dpiScaleY;
-        Width = _captureFrame.Width / _dpiScaleX;
-        Height = _captureFrame.Height / _dpiScaleY;
-        
-        OverlayCanvas.Width = _captureFrame.Width / _dpiScaleX;
-        OverlayCanvas.Height = _captureFrame.Height / _dpiScaleY;
-
-        FrozenDesktopImage.Width = _captureFrame.Width / _dpiScaleX;
-        FrozenDesktopImage.Height = _captureFrame.Height / _dpiScaleY;
+        UpdateContentLayout();
 
         ConfigureHintText();
-        PositionHintPanel(ToPixelPoint(Mouse.GetPosition(OverlayCanvas)));
-        ActionPanel.Visibility = _launchMode == CaptureLaunchMode.ChooseAction ? Visibility.Collapsed : Visibility.Collapsed;
+        PositionHintPanel(GetCursorOverlayPoint());
+        ActionPanel.Visibility = Visibility.Collapsed;
         UpdateShadeRects(null);
 
         if (UsesWindowPicking)
         {
-            UpdateWindowSelection(ToPixelPoint(Mouse.GetPosition(OverlayCanvas)));
+            UpdateWindowSelection(GetCursorOverlayPoint());
         }
+    }
+
+    /// <summary>
+    /// Intercepts WM_DPICHANGED to prevent WPF from resizing the window to the "suggested rect"
+    /// (which would shrink it to a single monitor). Instead, we update the DPI scale and
+    /// force the window back to the full virtual desktop dimensions.
+    /// </summary>
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WmDpiChanged)
+        {
+            int newDpiX = wParam.ToInt32() & 0xFFFF;
+            int newDpiY = (wParam.ToInt32() >> 16) & 0xFFFF;
+            _dpiScaleX = newDpiX / 96.0;
+            _dpiScaleY = newDpiY / 96.0;
+
+            // Force window back to full virtual desktop — ignore Windows' suggested rect
+            ForceWindowToVirtualDesktop();
+
+            // Re-layout content for the new DPI
+            UpdateContentLayout();
+
+            // Mark handled to prevent WPF from processing WM_DPICHANGED
+            // (which would resize the window to the suggested single-monitor rect)
+            handled = true;
+            return IntPtr.Zero;
+        }
+
+        return IntPtr.Zero;
     }
 
     private void CaptureOverlayWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        // Force position again after Loaded in case WPF adjusted it during layout
+        ForceWindowToVirtualDesktop();
+
         Activate();
         Focus();
         Keyboard.Focus(this);
@@ -138,31 +236,31 @@ public partial class CaptureOverlayWindow : Window
     private void CaptureOverlayWindow_Closed(object? sender, EventArgs e)
     {
         RemoveEscapeKeyboardHook();
+        _captureTcs.TrySetResult(null);
     }
 
     private void CaptureOverlayWindow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         Focus();
-        ActionPanel.Visibility = Visibility.Collapsed;
         _capturedSelection = null;
         _capturedSelectionBounds = null;
 
+        var point = GetCursorOverlayPoint();
+
         if (_selectionMode == CaptureSelectionMode.Window)
         {
-            UpdateWindowSelection(ToPixelPoint(e.GetPosition(OverlayCanvas)));
+            UpdateWindowSelection(point);
             if (_hoveredTarget is not { Window: { } hoveredWindow })
             {
                 return;
             }
 
             SelectedWindow = hoveredWindow;
-            DialogResult = true;
-            Close();
+            _captureTcs.TrySetResult(this);
             e.Handled = true;
             return;
         }
 
-        var point = ToPixelPoint(e.GetPosition(OverlayCanvas));
         if (_selectionMode is CaptureSelectionMode.WindowOrRegion or CaptureSelectionMode.ScrollTarget)
         {
             UpdateWindowSelection(point);
@@ -185,7 +283,7 @@ public partial class CaptureOverlayWindow : Window
 
     private void CaptureOverlayWindow_MouseMove(object sender, MouseEventArgs e)
     {
-        var pointer = ToPixelPoint(e.GetPosition(OverlayCanvas));
+        var pointer = GetCursorOverlayPoint();
         if (_selectionMode == CaptureSelectionMode.Window)
         {
             UpdateWindowSelection(pointer);
@@ -219,7 +317,6 @@ public partial class CaptureOverlayWindow : Window
         }
 
         UpdateShadeRects(_selectionSession.Selection);
-        PositionHintPanel(pointer);
     }
 
     private void CaptureOverlayWindow_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -245,7 +342,7 @@ public partial class CaptureOverlayWindow : Window
 
         if (_selectionMode == CaptureSelectionMode.WindowOrRegion && IsHybridClickSelection())
         {
-            var point = ToPixelPoint(e.GetPosition(OverlayCanvas));
+            var point = GetCursorOverlayPoint();
             var targetSelection = _pressedTarget ?? GetTargetSelectionAt(point);
             _pressedTarget = null;
             _selectionSession.Clear();
@@ -322,54 +419,43 @@ public partial class CaptureOverlayWindow : Window
         }
 
         _isCancelling = true;
-        RemoveEscapeKeyboardHook();
-        if (Mouse.Captured == this)
-        {
-            ReleaseMouseCapture();
-        }
-
-        _selectionSession.Clear();
-        _capturedSelection = null;
-        _capturedSelectionBounds = null;
-        SelectedWindow = null;
-        SelectedScrollTarget = null;
-        _hoveredTarget = null;
-        _pressedTarget = null;
-        Close();
+        _captureTcs.TrySetResult(null);
     }
 
-    private void InstallEscapeKeyboardHook()
+    private static void InstallEscapeKeyboardHook()
     {
-        if (_escapeKeyboardHook != IntPtr.Zero)
+        if (_escapeKeyboardHookStatic != IntPtr.Zero)
         {
             return;
         }
 
-        _escapeKeyboardHook = SetWindowsHookEx(WhKeyboardLowLevel, _escapeKeyboardProc, IntPtr.Zero, 0);
+        _escapeKeyboardProcStatic = EscapeKeyboardHookCallback;
+        _escapeKeyboardHookStatic = SetWindowsHookEx(WhKeyboardLowLevel, _escapeKeyboardProcStatic, IntPtr.Zero, 0);
     }
 
-    private void RemoveEscapeKeyboardHook()
+    private static void RemoveEscapeKeyboardHook()
     {
-        if (_escapeKeyboardHook == IntPtr.Zero)
+        if (_escapeKeyboardHookStatic == IntPtr.Zero)
         {
             return;
         }
 
-        UnhookWindowsHookEx(_escapeKeyboardHook);
-        _escapeKeyboardHook = IntPtr.Zero;
+        UnhookWindowsHookEx(_escapeKeyboardHookStatic);
+        _escapeKeyboardHookStatic = IntPtr.Zero;
+        _escapeKeyboardProcStatic = null;
     }
 
-    private IntPtr EscapeKeyboardHookCallback(int code, IntPtr wParam, IntPtr lParam)
+    private static IntPtr EscapeKeyboardHookCallback(int code, IntPtr wParam, IntPtr lParam)
     {
         if (code >= 0
             && (wParam == WmKeyDown || wParam == WmSysKeyDown)
             && Marshal.ReadInt32(lParam) == VirtualKeyEscape)
         {
-            Dispatcher.BeginInvoke((Action)CancelCapture);
-            return 1;
+            _captureTcs.TrySetResult(null);
+            return (IntPtr)1;
         }
 
-        return CallNextHookEx(_escapeKeyboardHook, code, wParam, lParam);
+        return CallNextHookEx(_escapeKeyboardHookStatic, code, wParam, lParam);
     }
 
     private bool IsHybridClickSelection()
@@ -409,12 +495,7 @@ public partial class CaptureOverlayWindow : Window
             ? new Size(selection.Width, selection.Height)
             : (Size?)null;
         CaptureResult = new CaptureResult(action, _capturedSelection);
-        if (IsVisible)
-        {
-            DialogResult = true;
-        }
-
-        Close();
+        _captureTcs.TrySetResult(this);
     }
 
     private void CaptureCurrentSelection()
@@ -426,7 +507,7 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        _capturedSelection = ApplyScreenDpi(Crop(selection));
+        _capturedSelection = Crop(selection);
         _capturedSelectionBounds = selection;
     }
 
@@ -436,10 +517,6 @@ public partial class CaptureOverlayWindow : Window
         _capturedSelection = targetSelection.ElementBounds is { } elementBounds
             ? _screenCaptureService.CaptureVisibleWindowRegion(targetSelection.Window.Handle, ToScreenRectangle(elementBounds))
             : _screenCaptureService.CaptureVisibleWindow(targetSelection.Window.Handle);
-        if (_capturedSelection is not null)
-        {
-            _capturedSelection = ApplyScreenDpi(_capturedSelection);
-        }
         _capturedSelectionBounds = targetSelection.Bounds;
 
         if (_launchMode == CaptureLaunchMode.CopyToClipboard)
@@ -467,7 +544,7 @@ public partial class CaptureOverlayWindow : Window
         CaptureTargetSelection? targetSelection;
         if (IsHybridClickSelection())
         {
-            var point = ToPixelPoint(e.GetPosition(OverlayCanvas));
+            var point = GetCursorOverlayPoint();
             targetSelection = _pressedTarget ?? GetTargetSelectionAt(point);
             _selectionSession.Clear();
         }
@@ -485,8 +562,7 @@ public partial class CaptureOverlayWindow : Window
         }
 
         SelectedScrollTarget = targetSelection;
-        DialogResult = true;
-        Close();
+        _captureTcs.TrySetResult(this);
     }
 
     private CaptureTargetSelection? CreateScrollTargetFromSelection(PixelRect? selection)
@@ -593,20 +669,22 @@ public partial class CaptureOverlayWindow : Window
 
     private void PositionHintPanel(PixelPoint pointer)
     {
+        HintPanel.Visibility = Visibility.Visible;
+
         HintPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var panelWidth = HintPanel.ActualWidth > 0 ? HintPanel.ActualWidth : HintPanel.DesiredSize.Width;
         var panelHeight = HintPanel.ActualHeight > 0 ? HintPanel.ActualHeight : HintPanel.DesiredSize.Height;
         var monitorBounds = GetMonitorBounds(pointer);
-        
-        var logicalLeft = monitorBounds.Left / _dpiScaleX;
-        var logicalTopBound = monitorBounds.Top / _dpiScaleY;
-        var logicalRight = monitorBounds.Right / _dpiScaleX;
-        var logicalBottom = monitorBounds.Bottom / _dpiScaleY;
-        var logicalWidth = monitorBounds.Width / _dpiScaleX;
-        var logicalHeight = monitorBounds.Height / _dpiScaleY;
 
-        var panelLeft = Clamp(logicalLeft + ((logicalWidth - panelWidth) / 2), logicalLeft, logicalRight - panelWidth);
-        var panelTop = Clamp(logicalTopBound + HintPanelTopMargin, logicalTopBound, logicalBottom - panelHeight);
+        var localLeft = monitorBounds.Left / _dpiScaleX;
+        var localTopBound = monitorBounds.Top / _dpiScaleY;
+        var localRight = monitorBounds.Right / _dpiScaleX;
+        var localBottom = monitorBounds.Bottom / _dpiScaleY;
+        var localWidth = monitorBounds.Width / _dpiScaleX;
+        var localHeight = monitorBounds.Height / _dpiScaleY;
+
+        var panelLeft = Clamp(localLeft + ((localWidth - panelWidth) / 2), localLeft, localRight - panelWidth);
+        var panelTop = Clamp(localTopBound + HintPanelTopMargin, localTopBound, localBottom - panelHeight);
         var topPanelBounds = new Rect(panelLeft, panelTop, panelWidth, panelHeight);
         topPanelBounds.Inflate(HintPanelMousePadding, HintPanelMousePadding);
 
@@ -615,7 +693,7 @@ public partial class CaptureOverlayWindow : Window
 
         if (topPanelBounds.Contains(new Point(logicalPointerX, logicalPointerY)))
         {
-            panelTop = Clamp(logicalTopBound + ((logicalHeight - panelHeight) / 2), logicalTopBound, logicalBottom - panelHeight);
+            panelTop = Clamp(localTopBound + ((localHeight - panelHeight) / 2), localTopBound, localBottom - panelHeight);
         }
 
         Canvas.SetLeft(HintPanel, panelLeft);
@@ -1486,8 +1564,10 @@ public partial class CaptureOverlayWindow : Window
 
     private void UpdateShadeRects(PixelRect? selection)
     {
+        // Convert physical pixel dimensions to WPF DIPs for layout
         var width = _captureFrame.Width / _dpiScaleX;
         var height = _captureFrame.Height / _dpiScaleY;
+
         if (selection is null || !selection.Value.HasArea)
         {
             SetRect(TopShade, 0, 0, width, height);
@@ -1500,30 +1580,34 @@ public partial class CaptureOverlayWindow : Window
         }
 
         var rect = selection.Value;
-        var rectLeft = rect.Left / _dpiScaleX;
-        var rectTop = rect.Top / _dpiScaleY;
-        var rectRight = rect.Right / _dpiScaleX;
-        var rectBottom = rect.Bottom / _dpiScaleY;
-        var rectWidth = rect.Width / _dpiScaleX;
-        var rectHeight = rect.Height / _dpiScaleY;
 
-        SetRect(TopShade, 0, 0, width, rectTop);
-        SetRect(LeftShade, 0, rectTop, rectLeft, rectHeight);
-        SetRect(RightShade, rectRight, rectTop, width - rectRight, rectHeight);
-        SetRect(BottomShade, 0, rectBottom, width, height - rectBottom);
-        SetRect(SelectionBorder, rectLeft, rectTop, rectWidth, rectHeight);
+        // Convert physical pixel selection to logical DIPs
+        double logicalLeft = rect.Left / _dpiScaleX;
+        double logicalTop = rect.Top / _dpiScaleY;
+        double logicalRight = rect.Right / _dpiScaleX;
+        double logicalBottom = rect.Bottom / _dpiScaleY;
+        double logicalWidth = rect.Width / _dpiScaleX;
+        double logicalHeight = rect.Height / _dpiScaleY;
+
+        SetRect(TopShade, 0, 0, width, logicalTop);
+        SetRect(LeftShade, 0, logicalTop, logicalLeft, logicalHeight);
+        SetRect(RightShade, logicalRight, logicalTop, width - logicalRight, logicalHeight);
+        SetRect(BottomShade, 0, logicalBottom, width, height - logicalBottom);
+
+        SetRect(SelectionBorder, logicalLeft, logicalTop, logicalWidth, logicalHeight);
+        SelectionBorder.Visibility = Visibility.Visible;
+
         SelectionInfoText.Text = $"{rect.Width} x {rect.Height}";
         SelectionInfoPanel.Visibility = Visibility.Visible;
         SelectionInfoPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var labelWidth = SelectionInfoPanel.DesiredSize.Width;
         var labelHeight = SelectionInfoPanel.DesiredSize.Height;
-        var labelLeft = Math.Max(24, Math.Min(rectLeft, width - labelWidth - 24));
-        var labelTop = rectTop >= labelHeight + 24
-            ? rectTop - labelHeight - 10
-            : Math.Min(height - labelHeight - 24, rectBottom + 10);
+        var labelLeft = Math.Max(24, Math.Min(logicalLeft, width - labelWidth - 24));
+        var labelTop = logicalTop >= labelHeight + 24
+            ? logicalTop - labelHeight - 10
+            : Math.Min(height - labelHeight - 24, logicalBottom + 10);
         Canvas.SetLeft(SelectionInfoPanel, labelLeft);
         Canvas.SetTop(SelectionInfoPanel, Math.Max(24, labelTop));
-        SelectionBorder.Visibility = Visibility.Visible;
     }
 
     private static void SetRect(FrameworkElement element, double left, double top, double width, double height)
@@ -1534,38 +1618,42 @@ public partial class CaptureOverlayWindow : Window
         element.Height = Math.Max(0, height);
     }
 
-    private PixelPoint ToPixelPoint(Point point)
+    private PixelPoint GetCursorOverlayPoint()
     {
-        return new PixelPoint((int)Math.Round(point.X * _dpiScaleX), (int)Math.Round(point.Y * _dpiScaleY));
-    }
-
-    private BitmapSource ApplyScreenDpi(BitmapSource bitmapSource)
-    {
-        var targetDpiX = 96.0 * _dpiScaleX;
-        var targetDpiY = 96.0 * _dpiScaleY;
-        if (Math.Abs(bitmapSource.DpiX - targetDpiX) < 0.001 && Math.Abs(bitmapSource.DpiY - targetDpiY) < 0.001)
+        if (!GetCursorPos(out var screenPoint))
         {
-            return bitmapSource;
+            return ToPixelPoint(Mouse.GetPosition(OverlayCanvas));
         }
 
-        var pixelFormat = bitmapSource.Format;
-        var stride = ((bitmapSource.PixelWidth * pixelFormat.BitsPerPixel) + 7) / 8;
-        var pixels = new byte[stride * bitmapSource.PixelHeight];
-        bitmapSource.CopyPixels(pixels, stride, 0);
-
-        var result = BitmapSource.Create(
-            bitmapSource.PixelWidth,
-            bitmapSource.PixelHeight,
-            targetDpiX,
-            targetDpiY,
-            pixelFormat,
-            bitmapSource.Palette,
-            pixels,
-            stride);
-        result.Freeze();
-        return result;
+        var overlayPoint = ToOverlayPoint(screenPoint);
+        return new PixelPoint(
+            Math.Clamp(overlayPoint.X, 0, _captureFrame.Width),
+            Math.Clamp(overlayPoint.Y, 0, _captureFrame.Height));
     }
 
+    private static NativePoint? TryGetPrimaryScreenCenter()
+    {
+        var primaryScreen = Forms.Screen.PrimaryScreen;
+        if (primaryScreen is null)
+        {
+            return null;
+        }
+
+        var bounds = primaryScreen.Bounds;
+        return new NativePoint(bounds.Left + (bounds.Width / 2), bounds.Top + (bounds.Height / 2));
+    }
+
+    /// <summary>
+    /// Converts a WPF DIP point to a PixelPoint in the overlay coordinate system.
+    /// This is only a fallback when Win32 cursor lookup fails.
+    /// </summary>
+    private PixelPoint ToPixelPoint(Point point)
+    {
+        // WPF gives us coordinates in DIPs; multiply by DPI scale to get physical pixels
+        return new PixelPoint(
+            (int)Math.Round(point.X * _dpiScaleX),
+            (int)Math.Round(point.Y * _dpiScaleY));
+    }
 
     private const uint GwHwndNext = 2;
     private const int GwlExStyle = -20;
@@ -1577,6 +1665,11 @@ public partial class CaptureOverlayWindow : Window
     private const int WmKeyDown = 0x0100;
     private const int WmSysKeyDown = 0x0104;
     private const int VirtualKeyEscape = 0x1B;
+    private const int WmDpiChanged = 0x02E0;
+
+    // SetWindowPos constants
+    private static readonly IntPtr HwndTopmost = new IntPtr(-1);
+    private const uint SwpNoActivate = 0x0010;
 
     private delegate IntPtr LowLevelKeyboardProc(int code, IntPtr wParam, IntPtr lParam);
 
@@ -1617,6 +1710,18 @@ public partial class CaptureOverlayWindow : Window
 
     [DllImport("user32.dll")]
     private static extern IntPtr CallNextHookEx(IntPtr hookHandle, int code, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativePoint point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out NativeRect pvAttribute, int cbAttribute);
@@ -1669,3 +1774,15 @@ public enum CaptureSelectionMode
 public sealed record WindowSelection(IntPtr Handle, PixelRect Bounds);
 
 public sealed record CaptureTargetSelection(WindowSelection Window, PixelRect Bounds, PixelRect? ElementBounds);
+
+public sealed class CaptureOverlayResult(
+    bool success,
+    CaptureResult? captureResult,
+    WindowSelection? selectedWindow,
+    CaptureTargetSelection? selectedScrollTarget)
+{
+    public bool Success { get; } = success;
+    public CaptureResult? CaptureResult { get; } = captureResult;
+    public WindowSelection? SelectedWindow { get; } = selectedWindow;
+    public CaptureTargetSelection? SelectedScrollTarget { get; } = selectedScrollTarget;
+}

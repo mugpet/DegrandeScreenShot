@@ -7,6 +7,8 @@
         MinWidth="850"
         MinHeight="400"
         Background="{DynamicResource ShellBackgroundBrush}"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         PreviewKeyDown="EditorWindow_PreviewKeyDown"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
@@ -578,7 +580,8 @@
                                 <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top">
                                     <Grid x:Name="ArtworkZoomHost"
                                           HorizontalAlignment="Left"
-                                          VerticalAlignment="Top">
+                                        VerticalAlignment="Top"
+                                        SnapsToDevicePixels="True">
                                         <Grid.LayoutTransform>
                                             <ScaleTransform x:Name="ArtworkZoomTransform" ScaleX="1" ScaleY="1" />
                                         </Grid.LayoutTransform>
@@ -587,10 +590,13 @@
                                               Background="Transparent"
                                               ClipToBounds="True"
                                               HorizontalAlignment="Left"
-                                              VerticalAlignment="Top">
+                                                VerticalAlignment="Top"
+                                                SnapsToDevicePixels="True">
                                         <Image x:Name="BaseImage"
                                                HorizontalAlignment="Left"
                                                VerticalAlignment="Top"
+                                                 SnapsToDevicePixels="True"
+                                                 RenderOptions.BitmapScalingMode="NearestNeighbor"
                                                Stretch="None" />
                                         <Canvas x:Name="AnnotationCanvas"
                                                 ClipToBounds="True"

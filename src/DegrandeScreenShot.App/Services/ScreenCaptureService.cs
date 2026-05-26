@@ -45,19 +45,15 @@ public sealed class ScreenCaptureService
 
     public CaptureFrame CaptureVirtualDesktop()
     {
-        var screens = Screen.AllScreens;
-        var left = screens.Min(screen => screen.Bounds.Left);
-        var top = screens.Min(screen => screen.Bounds.Top);
-        var right = screens.Max(screen => screen.Bounds.Right);
-        var bottom = screens.Max(screen => screen.Bounds.Bottom);
+        var desktopBounds = GetVirtualDesktopBounds();
 
-        using var bitmap = new System.Drawing.Bitmap(right - left, bottom - top, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using var bitmap = new System.Drawing.Bitmap(desktopBounds.Width, desktopBounds.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
         using (var graphics = Graphics.FromImage(bitmap))
         {
-            graphics.CopyFromScreen(left, top, 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
+            graphics.CopyFromScreen(desktopBounds.Left, desktopBounds.Top, 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
         }
 
-        return new CaptureFrame(left, top, ConvertToBitmapSource(bitmap));
+        return new CaptureFrame(desktopBounds.Left, desktopBounds.Top, ConvertToBitmapSource(bitmap));
     }
 
     public BitmapSource CaptureVisibleWindow(IntPtr windowHandle)
@@ -780,12 +776,11 @@ public sealed class ScreenCaptureService
 
     private static Rectangle GetVirtualDesktopBounds()
     {
-        var screens = Screen.AllScreens;
-        var desktopLeft = screens.Min(screen => screen.Bounds.Left);
-        var desktopTop = screens.Min(screen => screen.Bounds.Top);
-        var desktopRight = screens.Max(screen => screen.Bounds.Right);
-        var desktopBottom = screens.Max(screen => screen.Bounds.Bottom);
-        return Rectangle.FromLTRB(desktopLeft, desktopTop, desktopRight, desktopBottom);
+        return new Rectangle(
+            GetSystemMetrics(SystemMetricVirtualScreenLeft),
+            GetSystemMetrics(SystemMetricVirtualScreenTop),
+            GetSystemMetrics(SystemMetricVirtualScreenWidth),
+            GetSystemMetrics(SystemMetricVirtualScreenHeight));
     }
 
     private static void RestoreAndActivateWindow(IntPtr windowHandle)
@@ -990,6 +985,10 @@ public sealed class ScreenCaptureService
     private const int DwmWindowAttributeExtendedFrameBounds = 9;
     private const short KeyPressedMask = unchecked((short)0x8000);
     private const short KeyPressedSinceLastCheckMask = 0x0001;
+    private const int SystemMetricVirtualScreenLeft = 76;
+    private const int SystemMetricVirtualScreenTop = 77;
+    private const int SystemMetricVirtualScreenWidth = 78;
+    private const int SystemMetricVirtualScreenHeight = 79;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -1041,6 +1040,9 @@ public sealed class ScreenCaptureService
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ClipCursor(IntPtr lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(byte vKey);

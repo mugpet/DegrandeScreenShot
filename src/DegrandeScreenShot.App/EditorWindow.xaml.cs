@@ -3289,6 +3289,9 @@ public partial class EditorWindow : Window
 
         ArtworkZoomTransform.ScaleX = _zoomLevel * (_workingImage.DpiX / (96.0 * screenDpiScaleX));
         ArtworkZoomTransform.ScaleY = _zoomLevel * (_workingImage.DpiY / (96.0 * screenDpiScaleY));
+        RenderOptions.SetBitmapScalingMode(
+            BaseImage,
+            Math.Abs(_zoomLevel - 1.0) < 0.001 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);
     }
 
     private void UpdateEditorCursor(Point? mousePos = null)

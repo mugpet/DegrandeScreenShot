@@ -487,11 +487,12 @@ public partial class MainWindow : Window
             // Wait 130ms for the window hide transitions to complete and OS to redraw background
             await System.Threading.Tasks.Task.Delay(130);
 
-            var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
-            var overlay = new CaptureOverlayWindow(captureFrame, launchMode);
-            var result = overlay.ShowDialog();
+            IsEnabled = false;
 
-            if (overlay.CaptureResult is null)
+            var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
+            var result = await CaptureOverlayWindow.ShowOverlayAsync(captureFrame, launchMode);
+
+            if (!result.Success || result.CaptureResult is null)
             {
                 // Cancelled, restore previous states
                 if (wasLauncherVisible)
@@ -512,11 +513,11 @@ public partial class MainWindow : Window
                 _previewWindow = null;
             }
 
-            ShowCapturePreview(overlay.CaptureResult.Image);
+            ShowCapturePreview(result.CaptureResult.Image);
 
-            if (overlay.CaptureResult.Action == PostCaptureAction.Edit)
+            if (result.CaptureResult.Action == PostCaptureAction.Edit)
             {
-                OpenEditor(overlay.CaptureResult.Image);
+                OpenEditor(result.CaptureResult.Image);
             }
             else
             {
@@ -537,6 +538,10 @@ public partial class MainWindow : Window
                 _previewWindow?.Show();
             }
             System.Windows.MessageBox.Show(this, exception.Message, "Capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsEnabled = true;
         }
     }
 
@@ -560,11 +565,12 @@ public partial class MainWindow : Window
             // Wait 130ms for the window hide transitions to complete and OS to redraw background
             await System.Threading.Tasks.Task.Delay(130);
 
-            var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
-            var overlay = new CaptureOverlayWindow(captureFrame, CaptureLaunchMode.OpenEditor, CaptureSelectionMode.ScrollTarget);
-            var result = overlay.ShowDialog();
+            IsEnabled = false;
 
-            if (result != true || overlay.SelectedScrollTarget is not { } scrollTarget)
+            var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
+            var result = await CaptureOverlayWindow.ShowOverlayAsync(captureFrame, CaptureLaunchMode.OpenEditor, CaptureSelectionMode.ScrollTarget);
+
+            if (!result.Success || result.SelectedScrollTarget is not { } scrollTarget)
             {
                 // Cancelled, restore previous states
                 if (wasLauncherVisible)
@@ -586,7 +592,6 @@ public partial class MainWindow : Window
             }
 
             var image = _screenCaptureService.CaptureScrollingWindow(scrollTarget.Window.Handle, ToScreenRectangle(captureFrame, scrollTarget.Bounds));
-            image = ApplyScreenDpi(image);
             ShowCapturePreview(image);
             OpenEditor(image);
         }
@@ -613,6 +618,10 @@ public partial class MainWindow : Window
             }
             System.Windows.MessageBox.Show(this, exception.Message, "Scrolling capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+        finally
+        {
+            IsEnabled = true;
+        }
     }
 
     private void OpenClipboardInEditor()
@@ -633,35 +642,6 @@ public partial class MainWindow : Window
         editor.Show();
         editor.Activate();
     }
-
-    private BitmapSource ApplyScreenDpi(BitmapSource bitmapSource)
-    {
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var targetDpiX = 96.0 * dpi.DpiScaleX;
-        var targetDpiY = 96.0 * dpi.DpiScaleY;
-        if (Math.Abs(bitmapSource.DpiX - targetDpiX) < 0.001 && Math.Abs(bitmapSource.DpiY - targetDpiY) < 0.001)
-        {
-            return bitmapSource;
-        }
-
-        var pixelFormat = bitmapSource.Format;
-        var stride = ((bitmapSource.PixelWidth * pixelFormat.BitsPerPixel) + 7) / 8;
-        var pixels = new byte[stride * bitmapSource.PixelHeight];
-        bitmapSource.CopyPixels(pixels, stride, 0);
-
-        var result = BitmapSource.Create(
-            bitmapSource.PixelWidth,
-            bitmapSource.PixelHeight,
-            targetDpiX,
-            targetDpiY,
-            pixelFormat,
-            bitmapSource.Palette,
-            pixels,
-            stride);
-        result.Freeze();
-        return result;
-    }
-
 
     private static System.Drawing.Rectangle ToScreenRectangle(CaptureFrame captureFrame, DegrandeScreenShot.Core.PixelRect overlayRect)
     {

@@ -6,6 +6,7 @@
 - Do not tell the user to test without restarting the app first; restart it yourself.
 - For ongoing SignPath OSS GitHub Actions signing work, consult `docs/signpath-oss-github-actions.md` and the `signpath-oss-github-actions` repo skill before changing `.github/workflows/release.yml` or re-diagnosing SignPath setup.
 - Before changing scroll-capture stitching in `ScreenCaptureService.cs` or `ScrollCaptureStitcher.cs`, read `docs/scroll-capture-stitching.md` — it documents the verified min-SAD vertical-shift matcher and the dead-end approaches that must not be reintroduced.
+- Before changing multi-monitor capture overlay behavior, virtual desktop bounds, screenshot DPI handling, or editor 1:1 zoom, read the `capture-overlay-multimonitor` repo skill. The verified path depends on Win32 physical coordinates, primary-monitor overlay creation, raw virtual-screen metrics, 96-DPI screenshot bitmaps, and pixel-preserving 1:1 editor rendering.
 - Verified restart flow for this repo:
 
 ```powershell
