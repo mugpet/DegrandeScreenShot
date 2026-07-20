@@ -72,6 +72,9 @@ public partial class EditorWindow : Window
     private readonly List<AnnotationBase> _annotations = [];
     private readonly Stack<EditorDocumentState> _undoHistory = [];
     private readonly Stack<EditorDocumentState> _redoHistory = [];
+    private readonly ScreenshotLibraryService _screenshotLibrary = new();
+    private readonly string? _sourcePath;
+    private readonly CapturedCursor? _capturedCursor;
     private static int _nextEditorNumber = 1;
     private BitmapSource _workingImage;
     private Rect? _appliedCropRect;
@@ -93,6 +96,7 @@ public partial class EditorWindow : Window
     private CropHandle _activeCropHandle = CropHandle.None;
     private string? _activeHandle;
     private string? _savedPath;
+    private bool _isCapturedCursorVisible = true;
     private bool _isUpdatingInlineTextEditor;
     private bool _isUpdatingTextFontSize;
     private bool _isUpdatingTextBackgroundOpacity;
@@ -152,11 +156,19 @@ public partial class EditorWindow : Window
     private double _lastObscurePixelationLevel = DefaultObscurePixelationLevel;
     private readonly EditorPreferencesStore _preferencesStore = new();
 
-    public EditorWindow(BitmapSource baseImage)
+    public EditorWindow(
+        BitmapSource baseImage,
+        string? sourcePath = null,
+        CapturedCursor? capturedCursor = null)
     {
         InitializeComponent();
         ApplyEditorPreferences(_preferencesStore.Load());
         _workingImage = baseImage;
+        _sourcePath = sourcePath;
+        _capturedCursor = capturedCursor;
+        CursorVisibilityButton.IsEnabled = capturedCursor is not null;
+        CursorVisibilityButton.IsChecked = capturedCursor is not null;
+        _isCapturedCursorVisible = capturedCursor is not null;
         Loaded += EditorWindow_Loaded;
         SourceInitialized += EditorWindow_SourceInitialized;
         LocationChanged += EditorWindow_LocationChanged;
@@ -1772,6 +1784,13 @@ public partial class EditorWindow : Window
         ShowPreview(bitmap);
     }
 
+    private void CursorVisibilityButton_Click(object sender, RoutedEventArgs e)
+    {
+        _isCapturedCursorVisible = CursorVisibilityButton.IsChecked == true && _capturedCursor is not null;
+        CursorVisibilityButton.ToolTip = _isCapturedCursorVisible ? "Hide mouse cursor" : "Show mouse cursor";
+        UpdateCapturedCursorVisual();
+    }
+
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_savedPath))
@@ -1790,7 +1809,7 @@ public partial class EditorWindow : Window
             Filter = "PNG Image|*.png",
             AddExtension = true,
             DefaultExt = ".png",
-            InitialDirectory = GetPicturesFolder(),
+            InitialDirectory = _screenshotLibrary.RootDirectory,
             FileName = System.IO.Path.GetFileName(CreateDefaultSavePath()),
         };
 
@@ -1804,17 +1823,8 @@ public partial class EditorWindow : Window
 
     private BitmapSource SaveToPath(string path)
     {
-        var directory = System.IO.Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
         var bitmap = RenderComposite();
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var stream = File.Create(path);
-        encoder.Save(stream);
+        ScreenshotLibraryService.SavePng(bitmap, path);
         return bitmap;
     }
 
@@ -2712,15 +2722,11 @@ public partial class EditorWindow : Window
         _isUpdatingObscureColorStrength = false;
     }
 
-    private static string GetPicturesFolder()
+    private string CreateDefaultSavePath()
     {
-        return Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-    }
-
-    private static string CreateDefaultSavePath()
-    {
-        var fileName = $"Degrande Capture {DateTime.Now:yyyy-MM-dd HH-mm-ss}.png";
-        return System.IO.Path.Combine(GetPicturesFolder(), fileName);
+        return !string.IsNullOrWhiteSpace(_sourcePath)
+            ? _screenshotLibrary.CreateEditedPath(_sourcePath)
+            : _screenshotLibrary.CreateCapturePath(DateTime.Now);
     }
 
     private void SelectAnnotationAt(Point point)
@@ -3310,6 +3316,7 @@ public partial class EditorWindow : Window
             ArtworkSurface.Height = normalized.Height;
             BaseImage.RenderTransform = Transform.Identity;
             AnnotationCanvas.RenderTransform = new TranslateTransform(-normalized.X, -normalized.Y);
+            UpdateCapturedCursorVisual();
             UpdateImageDimensions(normalized.Width * (_workingImage.DpiX / 96.0), normalized.Height * (_workingImage.DpiY / 96.0));
             ApplyZoomTransform();
             QueueCenterArtworkInViewport();
@@ -3327,9 +3334,35 @@ public partial class EditorWindow : Window
         ArtworkSurface.Height = _workingImage.Height;
         BaseImage.RenderTransform = Transform.Identity;
         AnnotationCanvas.RenderTransform = Transform.Identity;
+        UpdateCapturedCursorVisual();
         UpdateImageDimensions(_workingImage.PixelWidth, _workingImage.PixelHeight);
         ApplyZoomTransform();
         QueueCenterArtworkInViewport();
+    }
+
+    private void UpdateCapturedCursorVisual()
+    {
+        if (_capturedCursor is null)
+        {
+            CapturedCursorImage.Source = null;
+            CapturedCursorImage.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var cropOffsetX = _appliedCropRect is { } cropRect ? NormalizeCropRect(cropRect).X : 0;
+        var cropOffsetY = _appliedCropRect is { } activeCropRect ? NormalizeCropRect(activeCropRect).Y : 0;
+        var left = _capturedCursor.Left - cropOffsetX;
+        var top = _capturedCursor.Top - cropOffsetY;
+        var cursorBounds = new Rect(left, top, _capturedCursor.Image.Width, _capturedCursor.Image.Height);
+        var artworkBounds = new Rect(0, 0, ArtworkSurface.Width, ArtworkSurface.Height);
+
+        CapturedCursorImage.Source = _capturedCursor.Image;
+        CapturedCursorImage.Width = _capturedCursor.Image.Width;
+        CapturedCursorImage.Height = _capturedCursor.Image.Height;
+        CapturedCursorImage.RenderTransform = new TranslateTransform(left, top);
+        CapturedCursorImage.Visibility = _isCapturedCursorVisible && cursorBounds.IntersectsWith(artworkBounds)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void UpdateImageDimensions(double width, double height)

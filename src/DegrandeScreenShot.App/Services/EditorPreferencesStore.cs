@@ -15,6 +15,8 @@ internal sealed class EditorPreferencesStore
         "DegrandeScreenShot",
         "editor-preferences.json");
 
+    internal static event EventHandler? PreferencesChanged;
+
     internal EditorPreferences Load()
     {
         try
@@ -35,6 +37,7 @@ internal sealed class EditorPreferencesStore
 
     internal void Save(EditorPreferences preferences)
     {
+        var wasSaved = false;
         try
         {
             var directory = Path.GetDirectoryName(_preferencesPath);
@@ -45,10 +48,23 @@ internal sealed class EditorPreferencesStore
 
             var json = JsonSerializer.Serialize(preferences, SerializerOptions);
             File.WriteAllText(_preferencesPath, json);
+            wasSaved = true;
         }
         catch
         {
             // Ignore persistence errors and keep the editor usable.
+        }
+
+        if (wasSaved)
+        {
+            try
+            {
+                PreferencesChanged?.Invoke(this, EventArgs.Empty);
+            }
+            catch
+            {
+                // Preference listeners must never make editor settings unusable.
+            }
         }
     }
 }

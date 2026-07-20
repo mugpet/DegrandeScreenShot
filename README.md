@@ -18,12 +18,15 @@ It opens as a compact popup-style launcher, stays accessible from the tray, and 
 ## What It Does
 
 - Capture a screen region from a popup launcher or global hotkeys.
+- Take a 3, 5, or 10 second delayed region capture and position the pointer before the timer expires.
 - Send the result straight to the clipboard, straight to the editor, or choose after capture.
+- Automatically save captures to `Pictures\Degrande Screenshots` and browse them by day in the gallery.
 - Open existing clipboard content directly in the editor.
 - Annotate with arrows, frames, circles, highlights, text, and obscured areas.
 - Adjust arrow tail, body, front, head, border, and shadow values visually.
 - Apply text alignment and bold styling inside text annotations.
 - Reorder layers, crop the canvas, and use undo/redo while editing.
+- Show or hide the captured mouse cursor as a separate editor layer.
 - Start with Windows and live quietly in the tray when not in use.
 
 ## Shortcuts
@@ -32,7 +35,8 @@ The launcher registers these global shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl + Shift + Alt + 4` | Open the capture launcher |
+| `Ctrl + Shift + Alt + 0` | Open the screenshot gallery |
+| `Ctrl + Shift + Alt + 4` | Choose a 3, 5, or 10 second delayed capture |
 | `Ctrl + Shift + Alt + 5` | Open the capture launcher |
 | `Ctrl + Shift + Alt + 6` | Capture a region straight to the clipboard |
 | `Ctrl + Shift + Alt + 7` | Capture a region straight to the editor |

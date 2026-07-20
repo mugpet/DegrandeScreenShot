@@ -60,6 +60,7 @@ public partial class CaptureOverlayWindow : Window
     private CaptureTargetSelection? _hoveredTarget;
     private CaptureTargetSelection? _pressedTarget;
     private BitmapSource? _capturedSelection;
+    private CapturedCursor? _capturedCursor;
     private PixelRect? _capturedSelectionBounds;
     private PixelPoint? _pendingLeftButtonDownPoint;
     private CancellationTokenSource? _elementHoverSelectionCts;
@@ -160,14 +161,15 @@ public partial class CaptureOverlayWindow : Window
 
         if (completedOverlay is null)
         {
-            return new CaptureOverlayResult(false, null, null, null);
+            return new CaptureOverlayResult(false, null, null, null, null);
         }
 
         return new CaptureOverlayResult(
             true,
             completedOverlay.CaptureResult,
             completedOverlay.SelectedWindow,
-            completedOverlay.SelectedScrollTarget);
+            completedOverlay.SelectedScrollTarget,
+            completedOverlay._capturedSelectionBounds);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -382,6 +384,12 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
+        if (_launchMode == CaptureLaunchMode.SelectOnly)
+        {
+            CompleteSelectionOnly();
+            return;
+        }
+
         if (_launchMode == CaptureLaunchMode.CopyToClipboard)
         {
             Finish(PostCaptureAction.Copy);
@@ -508,13 +516,23 @@ public partial class CaptureOverlayWindow : Window
 
         if (action == PostCaptureAction.Copy)
         {
-            ClipboardHelper.SetImage(_capturedSelection);
+            ClipboardHelper.SetImage(new CapturedImage(_capturedSelection, _capturedCursor).Render());
         }
 
         var preferredEditorSize = _selectionSession.Selection is { } selection && selection.HasArea
             ? new Size(selection.Width, selection.Height)
             : (Size?)null;
-        CaptureResult = new CaptureResult(action, _capturedSelection);
+        CaptureResult = new CaptureResult(action, _capturedSelection, _capturedCursor);
+        _captureTcs.TrySetResult(this);
+    }
+
+    private void CompleteSelectionOnly()
+    {
+        if (_capturedSelectionBounds is not { HasArea: true })
+        {
+            return;
+        }
+
         _captureTcs.TrySetResult(this);
     }
 
@@ -523,20 +541,33 @@ public partial class CaptureOverlayWindow : Window
         if (_selectionSession.Selection is not { } selection || !selection.HasArea)
         {
             _capturedSelection = null;
+            _capturedCursor = null;
             _capturedSelectionBounds = null;
             return;
         }
 
         _capturedSelection = Crop(selection);
+        _capturedCursor = GetCursorForSelection(selection);
         _capturedSelectionBounds = selection;
     }
 
     private void CaptureTarget(CaptureTargetSelection targetSelection)
     {
+        if (_launchMode == CaptureLaunchMode.SelectOnly)
+        {
+            _capturedSelectionBounds = targetSelection.Bounds;
+            _capturedSelection = Crop(targetSelection.Bounds);
+            _capturedCursor = GetCursorForSelection(targetSelection.Bounds);
+            CompleteSelectionOnly();
+            return;
+        }
+
         Hide();
-        _capturedSelection = targetSelection.ElementBounds is { } elementBounds
+        var capturedImage = targetSelection.ElementBounds is { } elementBounds
             ? _screenCaptureService.CaptureVisibleWindowRegion(targetSelection.Window.Handle, ToScreenRectangle(elementBounds))
             : _screenCaptureService.CaptureVisibleWindow(targetSelection.Window.Handle);
+        _capturedSelection = capturedImage.Image;
+        _capturedCursor = capturedImage.Cursor;
         _capturedSelectionBounds = targetSelection.Bounds;
 
         if (_launchMode == CaptureLaunchMode.CopyToClipboard)
@@ -617,6 +648,24 @@ public partial class CaptureOverlayWindow : Window
             new Int32Rect(selection.X, selection.Y, selection.Width, selection.Height));
         croppedBitmap.Freeze();
         return croppedBitmap;
+    }
+
+    private CapturedCursor? GetCursorForSelection(PixelRect selection)
+    {
+        if (_captureFrame.Cursor is not { } cursor)
+        {
+            return null;
+        }
+
+        var relativeCursor = cursor.Offset(-selection.X, -selection.Y);
+        var cursorBounds = new Rect(
+            relativeCursor.Left,
+            relativeCursor.Top,
+            relativeCursor.Image.Width,
+            relativeCursor.Image.Height);
+        return cursorBounds.IntersectsWith(new Rect(0, 0, selection.Width, selection.Height))
+            ? relativeCursor
+            : null;
     }
 
     private void PositionActionPanel()
@@ -2157,6 +2206,7 @@ public enum CaptureLaunchMode
     ChooseAction,
     CopyToClipboard,
     OpenEditor,
+    SelectOnly,
 }
 
 public enum CaptureSelectionMode
@@ -2175,10 +2225,12 @@ public sealed class CaptureOverlayResult(
     bool success,
     CaptureResult? captureResult,
     WindowSelection? selectedWindow,
-    CaptureTargetSelection? selectedScrollTarget)
+    CaptureTargetSelection? selectedScrollTarget,
+    PixelRect? selectedBounds)
 {
     public bool Success { get; } = success;
     public CaptureResult? CaptureResult { get; } = captureResult;
     public WindowSelection? SelectedWindow { get; } = selectedWindow;
     public CaptureTargetSelection? SelectedScrollTarget { get; } = selectedScrollTarget;
+    public PixelRect? SelectedBounds { get; } = selectedBounds;
 }

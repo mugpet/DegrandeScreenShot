@@ -98,43 +98,77 @@
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <StackPanel Margin="2,0,16,0" VerticalAlignment="Center">
                     <TextBlock FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" Text="Capture" />
-                    <TextBlock Margin="0,2,0,0" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Select type" />
-                    <TextBlock Margin="0,2,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" Text="Ctrl+Shift+Alt+4 / 5" />
+                    <TextBlock x:Name="SelectorTitleText" Margin="0,2,0,0" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Select type" />
+                    <TextBlock x:Name="SelectorShortcutText" Margin="0,2,0,0" FontSize="11" Foreground="{DynamicResource IslandMutedTextBrush}" Text="Ctrl+Shift+Alt+5" />
                 </StackPanel>
 
                 <Border Width="1" Height="42" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
 
-                <Button Click="ActionButton_Click" Tag="CopyRegion" Style="{StaticResource CaptureTypePrimaryButtonStyle}" ToolTip="Region straight to clipboard">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8C8;" />
-                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Copy" />
-                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+6" />
-                    </StackPanel>
-                </Button>
+                <StackPanel x:Name="CaptureActionsPanel" Orientation="Horizontal">
+                    <Button Click="ActionButton_Click" Tag="CopyRegion" Style="{StaticResource CaptureTypePrimaryButtonStyle}" ToolTip="Region straight to clipboard">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8C8;" />
+                            <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Copy" />
+                            <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+6" />
+                        </StackPanel>
+                    </Button>
 
-                <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="OpenEditor" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Region straight to editor">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE70F;" />
-                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Edit" />
-                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+7" />
-                    </StackPanel>
-                </Button>
+                    <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="OpenEditor" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Region straight to editor">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE70F;" />
+                            <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Edit" />
+                            <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+7" />
+                        </StackPanel>
+                    </Button>
 
-                <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="ClipboardEditor" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Open clipboard in editor">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE77F;" />
-                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Clipboard" />
-                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+8" />
-                    </StackPanel>
-                </Button>
+                    <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="ClipboardEditor" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Open clipboard in editor">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE77F;" />
+                            <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Clipboard" />
+                            <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+8" />
+                        </StackPanel>
+                    </Button>
 
-                <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="ScrollingWindow" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Scrolling window to editor">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8CB;" />
-                        <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Scroll" />
-                        <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+9" />
-                    </StackPanel>
-                </Button>
+                    <Button Margin="8,0,0,0" Click="ActionButton_Click" Tag="ScrollingWindow" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Scrolling window to editor">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE8CB;" />
+                            <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Scroll" />
+                            <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Ctrl+Shift+Alt+9" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button Margin="8,0,0,0" Click="DelayModeButton_Click" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Take a delayed region capture">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE823;" />
+                            <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="Timer" />
+                            <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="3 / 5 / 10 sec" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <StackPanel x:Name="DelayActionsPanel" Orientation="Horizontal" Visibility="Collapsed">
+                    <Button Click="DelayButton_Click" Tag="3" Style="{StaticResource CaptureTypePrimaryButtonStyle}" ToolTip="Capture after 3 seconds">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE823;" />
+                            <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="3 seconds" />
+                            <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Quick" />
+                        </StackPanel>
+                    </Button>
+                    <Button Margin="8,0,0,0" Click="DelayButton_Click" Tag="5" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Capture after 5 seconds">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE823;" />
+                            <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="5 seconds" />
+                            <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Standard" />
+                        </StackPanel>
+                    </Button>
+                    <Button Margin="8,0,0,0" Click="DelayButton_Click" Tag="10" Style="{StaticResource CaptureTypeButtonStyle}" ToolTip="Capture after 10 seconds">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptureTypeIconStyle}" Text="&#xE823;" />
+                            <TextBlock Style="{StaticResource CaptureTypeTitleStyle}" Text="10 seconds" />
+                            <TextBlock Style="{StaticResource CaptureTypeHintStyle}" Text="Long" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
             </StackPanel>
         </Border>
     </Grid>

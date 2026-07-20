@@ -327,7 +327,7 @@
                                 <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Ctrl" /></Border>
                                 <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Shift" /></Border>
                                 <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="Alt" /></Border>
-                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="4 / 5" /></Border>
+                                <Border Style="{StaticResource KeycapStyle}"><TextBlock Style="{StaticResource KeycapTextStyle}" Text="5" /></Border>
                             </StackPanel>
                         </Grid>
                     </Button>

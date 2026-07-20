@@ -28,11 +28,13 @@ public partial class MainWindow : Window
     private const string StartupRunValueName = "DegrandeScreenShot";
     private readonly List<GlobalHotKeyManager> _hotKeyManagers;
     private readonly ScreenCaptureService _screenCaptureService = new();
+    private readonly ScreenshotLibraryService _screenshotLibrary = new();
     private readonly System.Drawing.Icon _trayAppIcon;
     private readonly bool _ownsTrayAppIcon;
     private readonly FormsNotifyIcon _trayIcon;
     private bool _isExplicitExit;
     private SnapshotPreviewWindow? _previewWindow;
+    private GalleryWindow? _galleryWindow;
     private bool _startHiddenInTray;
     private bool _isUpdatingStartupToggle;
     private bool _hotKeysRegistered;
@@ -51,7 +53,8 @@ public partial class MainWindow : Window
         UpdateStartupToggle();
         _hotKeyManagers =
         [
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D4, BeginCaptureTypeSelectorFromHotKey),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D0, ShowGalleryFromHotKey),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D4, BeginDelayedCaptureFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D5, BeginCaptureTypeSelectorFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D6, BeginClipboardCaptureFromHotKey),
             new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D7, BeginEditorCaptureFromHotKey),
@@ -112,6 +115,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _galleryWindow?.Close();
+        _galleryWindow = null;
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
 
@@ -467,6 +472,54 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(StartScrollingWindowCapture);
     }
 
+    private void BeginDelayedCaptureFromHotKey()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            try
+            {
+                ShowDelayedCaptureSelector();
+            }
+            catch (Exception exception)
+            {
+                System.Windows.MessageBox.Show(this, exception.Message, "Delayed capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        });
+    }
+
+    private void ShowGalleryFromHotKey()
+    {
+        Dispatcher.Invoke(ShowGallery);
+    }
+
+    private void ShowGallery()
+    {
+        if (_galleryWindow is { IsLoaded: true })
+        {
+            if (_galleryWindow.WindowState == WindowState.Minimized)
+            {
+                _galleryWindow.WindowState = WindowState.Normal;
+            }
+
+            _galleryWindow.Show();
+            _galleryWindow.Activate();
+            return;
+        }
+
+        var gallery = new GalleryWindow(_screenshotLibrary);
+        gallery.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_galleryWindow, gallery))
+            {
+                _galleryWindow = null;
+            }
+        };
+
+        _galleryWindow = gallery;
+        gallery.Show();
+        gallery.Activate();
+    }
+
     private async void StartCapture(CaptureLaunchMode launchMode)
     {
         bool wasLauncherVisible = IsVisible;
@@ -513,11 +566,13 @@ public partial class MainWindow : Window
                 _previewWindow = null;
             }
 
-            ShowCapturePreview(result.CaptureResult.Image);
+            var displayImage = result.CaptureResult.Render();
+            var savedPath = _screenshotLibrary.SaveCapture(displayImage);
+            ShowCapturePreview(displayImage);
 
             if (result.CaptureResult.Action == PostCaptureAction.Edit)
             {
-                OpenEditor(result.CaptureResult.Image);
+                OpenEditor(result.CaptureResult.Image, savedPath, result.CaptureResult.Cursor);
             }
             else
             {
@@ -592,8 +647,9 @@ public partial class MainWindow : Window
             }
 
             var image = _screenCaptureService.CaptureScrollingWindow(scrollTarget.Window.Handle, ToScreenRectangle(captureFrame, scrollTarget.Bounds));
+            var savedPath = _screenshotLibrary.SaveCapture(image);
             ShowCapturePreview(image);
-            OpenEditor(image);
+            OpenEditor(image, savedPath);
         }
         catch (OperationCanceledException)
         {
@@ -636,11 +692,101 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OpenEditor(BitmapSource image)
+    private void OpenEditor(BitmapSource image, string? sourcePath = null, CapturedCursor? capturedCursor = null)
     {
-        var editor = new EditorWindow(image);
+        var editor = new EditorWindow(image, sourcePath, capturedCursor);
         editor.Show();
         editor.Activate();
+    }
+
+    private void ShowDelayedCaptureSelector()
+    {
+        if (_isCaptureTypeSelectorOpen)
+        {
+            return;
+        }
+
+        _isCaptureTypeSelectorOpen = true;
+        try
+        {
+            var selector = new CaptureTypeSelectorWindow(GetCursorPosition(), CaptureTypeSelectorMode.Delay);
+            var result = selector.ShowDialog();
+            if (result == true && selector.SelectedDelaySeconds is { } seconds)
+            {
+                StartDelayedCapture(seconds);
+            }
+        }
+        finally
+        {
+            _isCaptureTypeSelectorOpen = false;
+        }
+    }
+
+    private async void StartDelayedCapture(int delaySeconds)
+    {
+        var wasLauncherVisible = IsVisible;
+        var wasPreviewVisible = _previewWindow is { IsVisible: true };
+
+        try
+        {
+            if (wasPreviewVisible)
+            {
+                _previewWindow?.Hide();
+            }
+
+            await Task.Delay(130);
+            IsEnabled = false;
+
+            var selectionFrame = _screenCaptureService.CaptureVirtualDesktop();
+            var selectionResult = await CaptureOverlayWindow.ShowOverlayAsync(
+                selectionFrame,
+                CaptureLaunchMode.SelectOnly);
+            if (!selectionResult.Success || selectionResult.SelectedBounds is not { HasArea: true } selectedBounds)
+            {
+                if (wasLauncherVisible)
+                {
+                    ShowLauncher();
+                }
+
+                if (wasPreviewVisible)
+                {
+                    _previewWindow?.Show();
+                }
+
+                return;
+            }
+
+            _previewWindow?.Close();
+            _previewWindow = null;
+
+            var screenBounds = ToScreenRectangle(selectionFrame, selectedBounds);
+            var countdown = new CaptureCountdownWindow(screenBounds);
+            await countdown.RunAsync(delaySeconds);
+
+            var capturedImage = _screenCaptureService.CaptureScreenRegion(screenBounds);
+            var displayImage = capturedImage.Render();
+            var savedPath = _screenshotLibrary.SaveCapture(displayImage);
+            ShowCapturePreview(displayImage);
+            OpenEditor(capturedImage.Image, savedPath, capturedImage.Cursor);
+        }
+        catch (Exception exception)
+        {
+            if (wasLauncherVisible)
+            {
+                ShowLauncher();
+            }
+
+            if (wasPreviewVisible)
+            {
+                _previewWindow?.Show();
+            }
+
+            System.Windows.MessageBox.Show(this, exception.Message, "Delayed capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsEnabled = true;
+        }
     }
 
     private static System.Drawing.Rectangle ToScreenRectangle(CaptureFrame captureFrame, DegrandeScreenShot.Core.PixelRect overlayRect)
@@ -664,7 +810,18 @@ public partial class MainWindow : Window
         {
             var selector = new CaptureTypeSelectorWindow(GetCursorPosition());
             var result = selector.ShowDialog();
-            if (result != true || selector.SelectedAction is not { } action)
+            if (result != true)
+            {
+                return;
+            }
+
+            if (selector.SelectedDelaySeconds is { } delaySeconds)
+            {
+                StartDelayedCapture(delaySeconds);
+                return;
+            }
+
+            if (selector.SelectedAction is not { } action)
             {
                 return;
             }
@@ -785,10 +942,13 @@ public partial class MainWindow : Window
         showItem.Click += (_, _) => Dispatcher.Invoke(ShowLauncher);
         var captureItem = new FormsToolStripMenuItem("Capture Region");
         captureItem.Click += (_, _) => Dispatcher.Invoke(() => StartCapture(CaptureLaunchMode.OpenEditor));
+        var galleryItem = new FormsToolStripMenuItem("Screenshot Gallery");
+        galleryItem.Click += (_, _) => Dispatcher.Invoke(ShowGallery);
         var exitItem = new FormsToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => Dispatcher.Invoke(ExitFromTray);
         trayMenu.Items.Add(showItem);
         trayMenu.Items.Add(captureItem);
+        trayMenu.Items.Add(galleryItem);
         trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         trayMenu.Items.Add(exitItem);
 

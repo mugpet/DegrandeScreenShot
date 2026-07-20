@@ -14,14 +14,19 @@ public partial class CaptureTypeSelectorWindow : Window
     private const string WindowsThemeRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 
     private readonly Point _anchorScreenPoint;
+    private CaptureTypeSelectorMode _selectorMode;
     private readonly EditorPreferencesStore _preferencesStore = new();
     private bool _closingBySelection;
     private bool _isClosing;
 
-    public CaptureTypeSelectorWindow(Point anchorScreenPoint)
+    public CaptureTypeSelectorWindow(
+        Point anchorScreenPoint,
+        CaptureTypeSelectorMode selectorMode = CaptureTypeSelectorMode.CaptureType)
     {
         InitializeComponent();
         _anchorScreenPoint = anchorScreenPoint;
+        _selectorMode = selectorMode;
+        ConfigureSelectorMode();
         ApplyTheme();
 
         Loaded += CaptureTypeSelectorWindow_Loaded;
@@ -32,6 +37,26 @@ public partial class CaptureTypeSelectorWindow : Window
     }
 
     internal CaptureTypeSelection? SelectedAction { get; private set; }
+    internal int? SelectedDelaySeconds { get; private set; }
+
+    private void ConfigureSelectorMode()
+    {
+        if (_selectorMode == CaptureTypeSelectorMode.Delay)
+        {
+            Title = "Capture Delay";
+            SelectorTitleText.Text = "Select delay";
+            SelectorShortcutText.Text = "Timer starts after selection";
+            CaptureActionsPanel.Visibility = Visibility.Collapsed;
+            DelayActionsPanel.Visibility = Visibility.Visible;
+            return;
+        }
+
+        Title = "Capture Type";
+        SelectorTitleText.Text = "Select type";
+        SelectorShortcutText.Text = "Ctrl+Shift+Alt+5";
+        CaptureActionsPanel.Visibility = Visibility.Visible;
+        DelayActionsPanel.Visibility = Visibility.Collapsed;
+    }
 
     protected override void OnSourceInitialized(EventArgs e)
     {
@@ -62,6 +87,34 @@ public partial class CaptureTypeSelectorWindow : Window
 
     private void CaptureTypeSelectorWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (_selectorMode == CaptureTypeSelectorMode.Delay)
+        {
+            switch (e.Key)
+            {
+                case Key.D3:
+                case Key.NumPad3:
+                    SelectDelay(3);
+                    e.Handled = true;
+                    break;
+                case Key.D5:
+                case Key.NumPad5:
+                    SelectDelay(5);
+                    e.Handled = true;
+                    break;
+                case Key.D0:
+                case Key.NumPad0:
+                    SelectDelay(10);
+                    e.Handled = true;
+                    break;
+                case Key.Escape:
+                    CloseSelector();
+                    e.Handled = true;
+                    break;
+            }
+
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Escape:
@@ -105,6 +158,33 @@ public partial class CaptureTypeSelectorWindow : Window
         }
 
         SelectAction(action);
+    }
+
+    private void DelayButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string tag } && int.TryParse(tag, out var seconds))
+        {
+            SelectDelay(seconds);
+        }
+    }
+
+    private void DelayModeButton_Click(object sender, RoutedEventArgs e)
+    {
+        _selectorMode = CaptureTypeSelectorMode.Delay;
+        ConfigureSelectorMode();
+    }
+
+    private void SelectDelay(int seconds)
+    {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _closingBySelection = true;
+        _isClosing = true;
+        SelectedDelaySeconds = seconds;
+        DialogResult = true;
     }
 
     private void SelectAction(CaptureTypeSelection action)
@@ -260,4 +340,10 @@ internal enum CaptureTypeSelection
     OpenEditor,
     ClipboardEditor,
     ScrollingWindow,
+}
+
+public enum CaptureTypeSelectorMode
+{
+    CaptureType,
+    Delay,
 }

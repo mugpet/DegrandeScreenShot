@@ -53,10 +53,14 @@ public sealed class ScreenCaptureService
             graphics.CopyFromScreen(desktopBounds.Left, desktopBounds.Top, 0, 0, bitmap.Size, CopyPixelOperation.SourceCopy);
         }
 
-        return new CaptureFrame(desktopBounds.Left, desktopBounds.Top, ConvertToBitmapSource(bitmap));
+        return new CaptureFrame(
+            desktopBounds.Left,
+            desktopBounds.Top,
+            ConvertToBitmapSource(bitmap),
+            CaptureCursor(desktopBounds));
     }
 
-    public BitmapSource CaptureVisibleWindow(IntPtr windowHandle)
+    public CapturedImage CaptureVisibleWindow(IntPtr windowHandle)
     {
         if (windowHandle == IntPtr.Zero)
         {
@@ -76,7 +80,7 @@ public sealed class ScreenCaptureService
             var windowBounds = GetWindowBounds(windowHandle);
             EnsureWindowIsVisibleOnDesktop(windowBounds);
             using var bitmap = CaptureScreenRectangle(windowBounds);
-            return ConvertToBitmapSource(bitmap);
+            return new CapturedImage(ConvertToBitmapSource(bitmap), CaptureCursor(windowBounds));
         }
         finally
         {
@@ -88,7 +92,7 @@ public sealed class ScreenCaptureService
         }
     }
 
-    public BitmapSource CaptureVisibleWindowRegion(IntPtr windowHandle, Rectangle captureBounds)
+    public CapturedImage CaptureVisibleWindowRegion(IntPtr windowHandle, Rectangle captureBounds)
     {
         if (windowHandle == IntPtr.Zero)
         {
@@ -111,7 +115,7 @@ public sealed class ScreenCaptureService
             SleepWithCancellation((int)FocusDelay.TotalMilliseconds);
 
             using var bitmap = CaptureScreenRectangle(captureBounds);
-            return ConvertToBitmapSource(bitmap);
+            return new CapturedImage(ConvertToBitmapSource(bitmap), CaptureCursor(captureBounds));
         }
         finally
         {
@@ -121,6 +125,17 @@ public sealed class ScreenCaptureService
                 SetForegroundWindow(previousForegroundWindow);
             }
         }
+    }
+
+    public CapturedImage CaptureScreenRegion(Rectangle bounds)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(bounds), "The capture area must have a positive size.");
+        }
+
+        using var bitmap = CaptureScreenRectangle(bounds);
+        return new CapturedImage(ConvertToBitmapSource(bitmap), CaptureCursor(bounds));
     }
 
     public BitmapSource CaptureScrollingWindow(IntPtr windowHandle)
@@ -200,6 +215,66 @@ public sealed class ScreenCaptureService
         finally
         {
             DeleteObject(handle);
+        }
+    }
+
+    private static CapturedCursor? CaptureCursor(Rectangle captureBounds)
+    {
+        var cursorInfo = new CursorInfo
+        {
+            Size = Marshal.SizeOf<CursorInfo>(),
+        };
+
+        if (!GetCursorInfo(ref cursorInfo)
+            || (cursorInfo.Flags & CursorShowing) == 0
+            || cursorInfo.Handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var cursorHandle = CopyIcon(cursorInfo.Handle);
+        if (cursorHandle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        IconInfo iconInfo = default;
+        try
+        {
+            if (!GetIconInfo(cursorHandle, out iconInfo))
+            {
+                return null;
+            }
+
+            var image = Imaging.CreateBitmapSourceFromHIcon(
+                cursorHandle,
+                Int32Rect.Empty,
+                BitmapSizeOptions.FromEmptyOptions());
+            image.Freeze();
+
+            var left = cursorInfo.Position.X - (int)iconInfo.HotspotX - captureBounds.Left;
+            var top = cursorInfo.Position.Y - (int)iconInfo.HotspotY - captureBounds.Top;
+            var cursorBounds = new Rectangle(left, top, image.PixelWidth, image.PixelHeight);
+            if (!cursorBounds.IntersectsWith(new Rectangle(0, 0, captureBounds.Width, captureBounds.Height)))
+            {
+                return null;
+            }
+
+            return new CapturedCursor(image, left, top);
+        }
+        finally
+        {
+            if (iconInfo.ColorBitmap != IntPtr.Zero)
+            {
+                DeleteObject(iconInfo.ColorBitmap);
+            }
+
+            if (iconInfo.MaskBitmap != IntPtr.Zero)
+            {
+                DeleteObject(iconInfo.MaskBitmap);
+            }
+
+            DestroyIcon(cursorHandle);
         }
     }
 
@@ -989,6 +1064,7 @@ public sealed class ScreenCaptureService
     private const int SystemMetricVirtualScreenTop = 77;
     private const int SystemMetricVirtualScreenWidth = 78;
     private const int SystemMetricVirtualScreenHeight = 79;
+    private const int CursorShowing = 0x00000001;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -1035,6 +1111,21 @@ public sealed class ScreenCaptureService
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorInfo(ref CursorInfo cursorInfo);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CopyIcon(IntPtr iconHandle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetIconInfo(IntPtr iconHandle, out IconInfo iconInfo);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(IntPtr iconHandle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ClipCursor(ref NativeRect lpRect);
 
     [DllImport("user32.dll")]
@@ -1068,9 +1159,67 @@ public sealed class ScreenCaptureService
         public int X;
         public int Y;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorInfo
+    {
+        public int Size;
+        public int Flags;
+        public IntPtr Handle;
+        public NativePoint Position;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IconInfo
+    {
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool IsIcon;
+        public uint HotspotX;
+        public uint HotspotY;
+        public IntPtr MaskBitmap;
+        public IntPtr ColorBitmap;
+    }
 }
 
-public sealed record CaptureFrame(int VirtualLeft, int VirtualTop, BitmapSource Bitmap)
+public sealed record CapturedCursor(BitmapSource Image, double Left, double Top)
+{
+    public CapturedCursor Offset(double horizontal, double vertical)
+    {
+        return this with { Left = Left + horizontal, Top = Top + vertical };
+    }
+}
+
+public sealed record CapturedImage(BitmapSource Image, CapturedCursor? Cursor = null)
+{
+    public BitmapSource Render(bool showCursor = true)
+    {
+        if (!showCursor || Cursor is null)
+        {
+            return Image;
+        }
+
+        var visual = new System.Windows.Media.DrawingVisual();
+        using (var context = visual.RenderOpen())
+        {
+            context.DrawImage(Image, new Rect(0, 0, Image.Width, Image.Height));
+            context.DrawImage(
+                Cursor.Image,
+                new Rect(Cursor.Left, Cursor.Top, Cursor.Image.Width, Cursor.Image.Height));
+        }
+
+        var rendered = new RenderTargetBitmap(
+            Image.PixelWidth,
+            Image.PixelHeight,
+            Image.DpiX,
+            Image.DpiY,
+            System.Windows.Media.PixelFormats.Pbgra32);
+        rendered.Render(visual);
+        rendered.Freeze();
+        return rendered;
+    }
+}
+
+public sealed record CaptureFrame(int VirtualLeft, int VirtualTop, BitmapSource Bitmap, CapturedCursor? Cursor = null)
 {
     public int Width => Bitmap.PixelWidth;
 
@@ -1083,4 +1232,10 @@ public enum PostCaptureAction
     Edit,
 }
 
-public sealed record CaptureResult(PostCaptureAction Action, BitmapSource Image);
+public sealed record CaptureResult(PostCaptureAction Action, BitmapSource Image, CapturedCursor? Cursor = null)
+{
+    public BitmapSource Render(bool showCursor = true)
+    {
+        return new CapturedImage(Image, Cursor).Render(showCursor);
+    }
+}

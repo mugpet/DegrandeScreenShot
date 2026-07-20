@@ -2,6 +2,9 @@ using DegrandeScreenShot.Core;
 using DegrandeScreenShot.App;
 using DegrandeScreenShot.App.Services;
 using System.Collections.Generic;
+using System.IO;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace DegrandeScreenShot.Tests;
 
@@ -82,6 +85,99 @@ public class SelectionSessionTests
 
         Assert.True(moveStarted);
         Assert.Equal(new PixelRect(10, 10, 40, 40), session.Selection);
+    }
+}
+
+public class ScreenshotLibraryServiceTests : IDisposable
+{
+    private readonly string _testDirectory = Path.Combine(
+        Path.GetTempPath(),
+        "DegrandeScreenShot.Tests",
+        Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public void UsesConventionalTimestampedCaptureNamesAndAvoidsCollisions()
+    {
+        var service = new ScreenshotLibraryService(_testDirectory);
+        var capturedAt = new DateTime(2026, 7, 20, 14, 5, 9);
+
+        var firstPath = service.CreateCapturePath(capturedAt);
+        File.WriteAllBytes(firstPath, []);
+        var secondPath = service.CreateCapturePath(capturedAt);
+
+        Assert.Equal("Screenshot 2026-07-20 14-05-09.png", Path.GetFileName(firstPath));
+        Assert.Equal("Screenshot 2026-07-20 14-05-09 (2).png", Path.GetFileName(secondPath));
+    }
+
+    [Fact]
+    public void CreatesDistinctEditedVersionsWithoutOverwritingTheSource()
+    {
+        var service = new ScreenshotLibraryService(_testDirectory);
+        var sourcePath = Path.Combine(_testDirectory, "Screenshot 2026-07-20 14-05-09.png");
+
+        var firstEditedPath = service.CreateEditedPath(sourcePath);
+        File.WriteAllBytes(firstEditedPath, []);
+        var secondEditedPath = service.CreateEditedPath(firstEditedPath);
+
+        Assert.Equal("Screenshot 2026-07-20 14-05-09 - Edited.png", Path.GetFileName(firstEditedPath));
+        Assert.Equal("Screenshot 2026-07-20 14-05-09 - Edited (2).png", Path.GetFileName(secondEditedPath));
+        Assert.NotEqual(sourcePath, firstEditedPath);
+    }
+
+    [Fact]
+    public void SavedPngCanBeLoadedAsAGalleryThumbnail()
+    {
+        var service = new ScreenshotLibraryService(_testDirectory);
+        var pixels = new byte[]
+        {
+            0, 0, 255, 255,
+            0, 255, 0, 255,
+            255, 0, 0, 255,
+            255, 255, 255, 255,
+        };
+        var image = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32, null, pixels, stride: 8);
+
+        var path = service.SaveCapture(image, new DateTime(2026, 7, 20, 15, 10, 0));
+        var thumbnail = ScreenshotLibraryService.LoadImage(path, decodePixelWidth: 480);
+
+        Assert.Equal(2, thumbnail.PixelWidth);
+        Assert.Equal(2, thumbnail.PixelHeight);
+        Assert.True(thumbnail.IsFrozen);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testDirectory))
+        {
+            Directory.Delete(_testDirectory, recursive: true);
+        }
+    }
+}
+
+public class CapturedImageTests
+{
+    [Fact]
+    public void RendersCursorAsASeparateOptionalLayer()
+    {
+        var basePixels = Enumerable.Repeat((byte)255, 4 * 4 * 4).ToArray();
+        var cursorPixels = new byte[]
+        {
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+        };
+        var baseImage = BitmapSource.Create(4, 4, 96, 96, PixelFormats.Bgra32, null, basePixels, stride: 16);
+        var cursorImage = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32, null, cursorPixels, stride: 8);
+        var capture = new CapturedImage(baseImage, new CapturedCursor(cursorImage, 1, 1));
+
+        var withCursor = capture.Render(showCursor: true);
+        var withoutCursor = capture.Render(showCursor: false);
+        var renderedPixel = new byte[4];
+        withCursor.CopyPixels(new System.Windows.Int32Rect(1, 1, 1, 1), renderedPixel, stride: 4, offset: 0);
+
+        Assert.Equal(new byte[] { 0, 0, 255, 255 }, renderedPixel);
+        Assert.Same(baseImage, withoutCursor);
     }
 }
 
