@@ -492,7 +492,7 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(ShowGallery);
     }
 
-    private void ShowGallery()
+    internal void ShowGallery()
     {
         if (_galleryWindow is { IsLoaded: true })
         {
