@@ -1,6 +1,10 @@
 using System.Globalization;
 using System.IO;
+using System.Net;
+using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -30,8 +34,11 @@ public partial class EditorWindow : Window
     internal static readonly Color DefaultObscureColor = Color.FromRgb(217, 72, 65);
     internal static readonly Color DefaultHighlightColor = Color.FromRgb(245, 217, 10);
     internal const double DefaultTextFontSize = 26;
+    internal const double DefaultShapeBackgroundOpacity = 0.00;
+    internal const double DefaultFrameCornerRadius = 14.00;
     internal const double DefaultTextBackgroundOpacity = 0.80;
     internal const double DefaultTextBackgroundStrength = 0.30;
+    internal const double DefaultTextCornerRadius = 10.00;
     internal const double DefaultObscureColorStrength = 0.15;
     internal const double DefaultObscureBlurLevel = 0.00;
     internal const double DefaultObscurePixelationLevel = 0.20;
@@ -68,6 +75,9 @@ public partial class EditorWindow : Window
     private const double MaxZoomLevel = 4.0;
     private const double ZoomStepFactor = 1.15;
     private const int MaxArrowShapePresets = 12;
+    private static readonly Regex HtmlImageSourceRegex = new(
+        """<img\b[^>]*\bsrc\s*=\s*["'](?<url>[^"']+)["']""",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly List<AnnotationBase> _annotations = [];
     private readonly Stack<EditorDocumentState> _undoHistory = [];
@@ -75,6 +85,7 @@ public partial class EditorWindow : Window
     private readonly ScreenshotLibraryService _screenshotLibrary = new();
     private readonly string? _sourcePath;
     private readonly CapturedCursor? _capturedCursor;
+    private readonly BitmapSource _baseImageOriginal;
     private static int _nextEditorNumber = 1;
     private BitmapSource _workingImage;
     private Rect? _appliedCropRect;
@@ -99,6 +110,8 @@ public partial class EditorWindow : Window
     private bool _isCapturedCursorVisible = true;
     private bool _isUpdatingInlineTextEditor;
     private bool _isUpdatingTextFontSize;
+    private bool _isUpdatingShapeBackgroundOpacity;
+    private bool _isUpdatingCornerRoundness;
     private bool _isUpdatingTextBackgroundOpacity;
     private bool _isUpdatingTextBackgroundStrength;
     private bool _isUpdatingObscureBlurLevel;
@@ -108,6 +121,9 @@ public partial class EditorWindow : Window
     private bool _isUpdatingObjectShadowStrength;
     private bool _isUpdatingObjectBorderWidth;
     private bool _isUpdatingObjectScale;
+    private bool _isUpdatingImageResize;
+    private bool _isBaseImageAspectRatioLocked = true;
+    private double _baseImageLockedAspectRatio = 1;
     private bool _hasFittedInitialWindowSize;
     private SnapshotPreviewWindow? _previewWindow;
     private double _zoomLevel = 1.0;
@@ -116,6 +132,8 @@ public partial class EditorWindow : Window
     private double _panStartVerticalOffset;
     private ThemePreference _themePreference = ThemePreference.System;
     private Color _lastShapeColor = DefaultAccentColor;
+    private double _lastShapeBackgroundOpacity = DefaultShapeBackgroundOpacity;
+    private double _lastFrameCornerRadius = DefaultFrameCornerRadius;
     private Color _lastArrowColor = DefaultArrowColor;
     private ArrowStyle _lastArrowStyle = ArrowStyle.BrushStroke;
     private double _lastArrowTailScale = DefaultArrowTailScale;
@@ -146,6 +164,7 @@ public partial class EditorWindow : Window
     private double _lastTextFontSize = DefaultTextFontSize;
     private double _lastTextBackgroundOpacity = DefaultTextBackgroundOpacity;
     private double _lastTextBackgroundStrength = DefaultTextBackgroundStrength;
+    private double _lastTextCornerRadius = DefaultTextCornerRadius;
     private System.Windows.TextAlignment _lastTextAlignment = System.Windows.TextAlignment.Left;
     private bool _lastTextIsBold = false;
     private bool _isUpdatingTextAlignment;
@@ -155,6 +174,7 @@ public partial class EditorWindow : Window
     private double _lastObscureBlurLevel = DefaultObscureBlurLevel;
     private double _lastObscurePixelationLevel = DefaultObscurePixelationLevel;
     private readonly EditorPreferencesStore _preferencesStore = new();
+    private CancellationTokenSource? _imageImportCts;
 
     public EditorWindow(
         BitmapSource baseImage,
@@ -164,6 +184,8 @@ public partial class EditorWindow : Window
         InitializeComponent();
         ApplyEditorPreferences(_preferencesStore.Load());
         _workingImage = baseImage;
+        _baseImageOriginal = baseImage;
+        _baseImageLockedAspectRatio = GetAspectRatio(baseImage.PixelWidth, baseImage.PixelHeight);
         _sourcePath = sourcePath;
         _capturedCursor = capturedCursor;
         CursorVisibilityButton.IsEnabled = capturedCursor is not null;
@@ -288,6 +310,9 @@ public partial class EditorWindow : Window
 
     private void EditorWindow_Closed(object? sender, EventArgs e)
     {
+        _imageImportCts?.Cancel();
+        _imageImportCts?.Dispose();
+        _imageImportCts = null;
         SystemEvents.UserPreferenceChanged -= SystemEvents_UserPreferenceChanged;
         LocationChanged -= EditorWindow_LocationChanged;
         DpiChanged -= EditorWindow_DpiChanged;
@@ -637,6 +662,8 @@ public partial class EditorWindow : Window
             var annotation = new RectangleAnnotation { Bounds = new Rect(point, point) };
             ApplyLastUsedObjectSize(annotation);
             annotation.SetColor(_lastShapeColor);
+            annotation.SetBackgroundOpacity(_lastShapeBackgroundOpacity);
+            annotation.SetCornerRadius(_lastFrameCornerRadius);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
             _dragOperation = DragOperation.Draw;
@@ -649,6 +676,7 @@ public partial class EditorWindow : Window
             var annotation = new EllipseAnnotation { Bounds = new Rect(point, point) };
             ApplyLastUsedObjectSize(annotation);
             annotation.SetColor(_lastShapeColor);
+            annotation.SetBackgroundOpacity(_lastShapeBackgroundOpacity);
             _annotations.Add(annotation);
             _selectedAnnotation = annotation;
             _dragOperation = DragOperation.Draw;
@@ -1016,6 +1044,11 @@ public partial class EditorWindow : Window
         _appliedCropRect = cropRect;
         _lastCropSelection = cropRect;
         UpdateArtworkViewport();
+        if (_isBaseImageAspectRatioLocked)
+        {
+            var baseSize = GetBaseImageResizePixelSize();
+            _baseImageLockedAspectRatio = GetAspectRatio(baseSize.Width, baseSize.Height);
+        }
         _selectedAnnotation = null;
         _hoveredAnnotation = null;
         _contextMenuAnnotation = null;
@@ -1181,6 +1214,51 @@ public partial class EditorWindow : Window
         RefreshCanvas();
     }
 
+    private void ShapeBackgroundOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_isUpdatingShapeBackgroundOpacity || _contextMenuAnnotation is not IShapeBackgroundAnnotation shapeAnnotation)
+        {
+            return;
+        }
+
+        var opacity = ShapeBackgroundOpacitySlider.Value / 100d;
+        shapeAnnotation.SetBackgroundOpacity(opacity);
+        _lastShapeBackgroundOpacity = shapeAnnotation.BackgroundOpacity;
+        ShapeBackgroundOpacityValueText.Text = $"{(int)Math.Round(ShapeBackgroundOpacitySlider.Value)}%";
+        PersistEditorPreferences();
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void CornerRoundnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (CornerRoundnessValueLabel is null)
+        {
+            return;
+        }
+
+        CornerRoundnessValueLabel.Text = $"{Math.Round(e.NewValue):0} px";
+        if (_isUpdatingCornerRoundness || _contextMenuAnnotation is not IRoundedCornerAnnotation roundedAnnotation)
+        {
+            return;
+        }
+
+        roundedAnnotation.SetCornerRadius(Math.Round(e.NewValue));
+        switch (_contextMenuAnnotation)
+        {
+            case RectangleAnnotation:
+                _lastFrameCornerRadius = roundedAnnotation.CornerRadius;
+                break;
+            case TextAnnotation:
+                _lastTextCornerRadius = roundedAnnotation.CornerRadius;
+                break;
+        }
+
+        PersistEditorPreferences();
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
     private void TextBackgroundStrengthSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (_isUpdatingTextBackgroundStrength || _contextMenuAnnotation is not TextAnnotation textAnnotation)
@@ -1305,6 +1383,195 @@ public partial class EditorWindow : Window
         RefreshCanvas();
     }
 
+    private void ResizeImageButton_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateImageResizeControls(_contextMenuAnnotation as ImageAnnotation);
+        ImageResizePopup.IsOpen = !ImageResizePopup.IsOpen;
+    }
+
+    private void ImageResizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ImageResizeValueLabel is null || _isUpdatingImageResize)
+        {
+            return;
+        }
+
+        var imageSize = ClampObjectSize(e.NewValue);
+        if (_contextMenuAnnotation is ImageAnnotation imageAnnotation)
+        {
+            imageAnnotation.SetScale(imageSize);
+            UpdateImageResizeValues(imageAnnotation);
+        }
+        else
+        {
+            var currentScale = Math.Max(
+                0.01,
+                _workingImage.PixelWidth / (double)Math.Max(1, _baseImageOriginal.PixelWidth));
+            var relativeScale = imageSize / currentScale;
+            ResizeBaseImageViewport(
+                GetBaseImageResizePixelSize().Width * relativeScale,
+                GetBaseImageResizePixelSize().Height * relativeScale);
+            UpdateImageResizeValues();
+        }
+
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private void ImageDimensionTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (sender is TextBox textBox)
+        {
+            ApplyImageDimensionValue(textBox);
+        }
+    }
+
+    private void ImageDimensionTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox textBox)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            ApplyImageDimensionValue(textBox);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            UpdateImageResizeControls(_contextMenuAnnotation as ImageAnnotation);
+
+            e.Handled = true;
+        }
+    }
+
+    private void ApplyImageDimensionValue(TextBox textBox)
+    {
+        if (_isUpdatingImageResize)
+        {
+            return;
+        }
+
+        if (!TryParseImageDimension(textBox.Text, out var dimension))
+        {
+            ImageResizeValidationText.Visibility = Visibility.Visible;
+            if (_contextMenuAnnotation is ImageAnnotation invalidImageAnnotation)
+            {
+                UpdateImageResizeValues(invalidImageAnnotation);
+            }
+            else
+            {
+                UpdateImageResizeValues();
+            }
+
+            textBox.SelectAll();
+            return;
+        }
+
+        ImageResizeValidationText.Visibility = Visibility.Collapsed;
+        if (_contextMenuAnnotation is ImageAnnotation imageAnnotation)
+        {
+            if (ReferenceEquals(textBox, ImageWidthTextBox))
+            {
+                imageAnnotation.SetWidth(dimension);
+            }
+            else if (ReferenceEquals(textBox, ImageHeightTextBox))
+            {
+                imageAnnotation.SetHeight(dimension);
+            }
+            else
+            {
+                return;
+            }
+        }
+        else
+        {
+            var size = GetBaseImageResizePixelSize();
+            var width = size.Width;
+            var height = size.Height;
+            if (ReferenceEquals(textBox, ImageWidthTextBox))
+            {
+                width = dimension;
+                if (_isBaseImageAspectRatioLocked)
+                {
+                    height = width / _baseImageLockedAspectRatio;
+                }
+            }
+            else if (ReferenceEquals(textBox, ImageHeightTextBox))
+            {
+                height = dimension;
+                if (_isBaseImageAspectRatioLocked)
+                {
+                    width = height * _baseImageLockedAspectRatio;
+                }
+            }
+            else
+            {
+                return;
+            }
+
+            ResizeBaseImageViewport(width, height);
+        }
+
+        UpdateImageResizeControls(_contextMenuAnnotation as ImageAnnotation);
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
+    private static bool TryParseImageDimension(string text, out double dimension)
+    {
+        var parsed = double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out dimension)
+            || double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out dimension);
+        return parsed
+            && double.IsFinite(dimension)
+            && dimension >= ImageAnnotation.MinimumSize
+            && dimension <= ImageAnnotation.MaximumSize;
+    }
+
+    private void ImageAspectRatioLockButton_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingImageResize)
+        {
+            return;
+        }
+
+        var isLocked = ImageAspectRatioLockButton.IsChecked == true;
+        if (_contextMenuAnnotation is ImageAnnotation imageAnnotation)
+        {
+            imageAnnotation.SetAspectRatioLocked(isLocked);
+        }
+        else
+        {
+            if (isLocked && !_isBaseImageAspectRatioLocked)
+            {
+                var size = GetBaseImageResizePixelSize();
+                _baseImageLockedAspectRatio = GetAspectRatio(size.Width, size.Height);
+            }
+
+            _isBaseImageAspectRatioLocked = isLocked;
+        }
+
+        UpdateImageResizeControls(_contextMenuAnnotation as ImageAnnotation);
+        CommitHistoryState();
+    }
+
+    private void ResetImageSize_Click(object sender, RoutedEventArgs e)
+    {
+        if (_contextMenuAnnotation is ImageAnnotation imageAnnotation)
+        {
+            imageAnnotation.ResetScale();
+        }
+        else
+        {
+            ResizeBaseImageFullDimensions(_baseImageOriginal.PixelWidth, _baseImageOriginal.PixelHeight);
+        }
+
+        UpdateImageResizeControls(_contextMenuAnnotation as ImageAnnotation);
+        CommitHistoryState();
+        RefreshCanvas();
+    }
+
     private void ResetScaleButton_Click(object sender, RoutedEventArgs e)
     {
         if (_contextMenuAnnotation is AnnotationBase annotation)
@@ -1425,21 +1692,28 @@ public partial class EditorWindow : Window
         {
             case RectangleAnnotation rectangle:
                 rectangle.SetColor(DefaultAccentColor);
+                rectangle.SetBackgroundOpacity(DefaultShapeBackgroundOpacity);
+                rectangle.SetCornerRadius(DefaultFrameCornerRadius);
                 rectangle.SetShadowStrength(DefaultShapeShadowStrength);
                 rectangle.SetBorderWidth(DefaultShapeBorderWidth);
                 _lastShapeColor = DefaultAccentColor;
+                _lastShapeBackgroundOpacity = DefaultShapeBackgroundOpacity;
+                _lastFrameCornerRadius = DefaultFrameCornerRadius;
                 break;
             case EllipseAnnotation ellipse:
                 ellipse.SetColor(DefaultAccentColor);
+                ellipse.SetBackgroundOpacity(DefaultShapeBackgroundOpacity);
                 ellipse.SetShadowStrength(DefaultShapeShadowStrength);
                 ellipse.SetBorderWidth(DefaultShapeBorderWidth);
                 _lastShapeColor = DefaultAccentColor;
+                _lastShapeBackgroundOpacity = DefaultShapeBackgroundOpacity;
                 break;
             case TextAnnotation text:
                 text.SetColor(DefaultTextColor);
                 text.SetFontSize(DefaultTextFontSize);
                 text.SetBackgroundOpacity(DefaultTextBackgroundOpacity);
                 text.SetBackgroundColorStrength(DefaultTextBackgroundStrength);
+                text.SetCornerRadius(DefaultTextCornerRadius);
                 text.SetShadowStrength(DefaultTextShadowStrength);
                 text.SetBorderWidth(DefaultTextBorderWidth);
                 text.SetTextAlignment(System.Windows.TextAlignment.Left);
@@ -1448,6 +1722,7 @@ public partial class EditorWindow : Window
                 _lastTextFontSize = DefaultTextFontSize;
                 _lastTextBackgroundOpacity = DefaultTextBackgroundOpacity;
                 _lastTextBackgroundStrength = DefaultTextBackgroundStrength;
+                _lastTextCornerRadius = DefaultTextCornerRadius;
                 _lastTextAlignment = System.Windows.TextAlignment.Left;
                 _lastTextIsBold = false;
                 if (ReferenceEquals(_editingTextAnnotation, text))
@@ -1779,6 +2054,7 @@ public partial class EditorWindow : Window
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
+        ClearSelectionBeforeExport();
         var bitmap = RenderComposite();
         ClipboardHelper.SetImage(bitmap);
         ShowPreview(bitmap);
@@ -1798,6 +2074,7 @@ public partial class EditorWindow : Window
             _savedPath = CreateDefaultSavePath();
         }
 
+        ClearSelectionBeforeExport();
         var bitmap = SaveToPath(_savedPath);
         ShowPreview(bitmap);
     }
@@ -1816,6 +2093,7 @@ public partial class EditorWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             _savedPath = dialog.FileName;
+            ClearSelectionBeforeExport();
             var bitmap = SaveToPath(_savedPath);
             ShowPreview(bitmap);
         }
@@ -1826,6 +2104,436 @@ public partial class EditorWindow : Window
         var bitmap = RenderComposite();
         ScreenshotLibraryService.SavePng(bitmap, path);
         return bitmap;
+    }
+
+    private void AddImageFromFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Add image",
+            Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff|All files|*.*",
+            Multiselect = true,
+            CheckFileExists = true,
+        };
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            ImportImageFiles(dialog.FileNames, GetDefaultImageImportCenter());
+        }
+    }
+
+    private void AddImageFromUrlButton_Click(object sender, RoutedEventArgs e)
+    {
+        ImageUrlStatusText.Visibility = Visibility.Collapsed;
+        ImageUrlStatusText.Text = string.Empty;
+        ImageUrlPopup.IsOpen = true;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            ImageUrlTextBox.Focus();
+            ImageUrlTextBox.SelectAll();
+        }), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private async void ConfirmImageUrl_Click(object sender, RoutedEventArgs e)
+    {
+        var url = ImageUrlTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            ShowImageUrlStatus("Enter an image URL.");
+            return;
+        }
+
+        ConfirmImageUrlButton.IsEnabled = false;
+        ShowImageUrlStatus("Loading image...");
+
+        try
+        {
+            await ImportImageUrlAsync(url, GetDefaultImageImportCenter());
+            ImageUrlTextBox.Clear();
+            ImageUrlPopup.IsOpen = false;
+        }
+        catch (OperationCanceledException)
+        {
+            ShowImageUrlStatus("Image loading was cancelled.");
+        }
+        catch (Exception exception) when (exception is HttpRequestException
+            or IOException
+            or NotSupportedException
+            or ArgumentException)
+        {
+            ShowImageUrlStatus(exception.Message);
+        }
+        finally
+        {
+            ConfirmImageUrlButton.IsEnabled = true;
+        }
+    }
+
+    private void CancelImageUrl_Click(object sender, RoutedEventArgs e)
+    {
+        _imageImportCts?.Cancel();
+        ImageUrlPopup.IsOpen = false;
+    }
+
+    private void ImageUrlTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            ConfirmImageUrlButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            CancelImageUrl_Click(sender, e);
+            e.Handled = true;
+        }
+    }
+
+    private void ShowImageUrlStatus(string message)
+    {
+        ImageUrlStatusText.Text = message;
+        ImageUrlStatusText.Visibility = Visibility.Visible;
+    }
+
+    private void ShowGallery_Click(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.ShowGallery();
+            return;
+        }
+
+        var gallery = new GalleryWindow(_screenshotLibrary);
+        gallery.Show();
+        gallery.Activate();
+    }
+
+    private void EditorWindow_PreviewDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = CanImportDroppedImage(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void EditorWindow_PreviewDrop(object sender, DragEventArgs e)
+    {
+        if (!CanImportDroppedImage(e.Data))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var dropPoint = ToDocumentPoint(e.GetPosition(AnnotationCanvas));
+
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)
+            && e.Data.GetData(DataFormats.FileDrop) is string[] filePaths
+            && filePaths.Length > 0)
+        {
+            ImportImageFiles(filePaths, dropPoint);
+            return;
+        }
+
+        if (e.Data.GetDataPresent(DataFormats.Bitmap)
+            && e.Data.GetData(DataFormats.Bitmap) is BitmapSource bitmap)
+        {
+            var frozenBitmap = BitmapFrame.Create(bitmap);
+            if (frozenBitmap.CanFreeze)
+            {
+                frozenBitmap.Freeze();
+            }
+
+            AddImportedImage(frozenBitmap, dropPoint, "Dropped image");
+            CommitHistoryState();
+            RefreshCanvas();
+            return;
+        }
+
+        if (ImageImportService.TryLoadDroppedImageData(e.Data, out var droppedImage))
+        {
+            AddImportedImage(droppedImage, dropPoint, "Dropped browser image");
+            CommitHistoryState();
+            RefreshCanvas();
+            return;
+        }
+
+        var imageUrls = GetDroppedImageUrls(e.Data);
+        if (imageUrls.Count == 0)
+        {
+            return;
+        }
+
+        Exception? lastException = null;
+        foreach (var imageUrl in imageUrls)
+        {
+            try
+            {
+                await ImportImageUrlAsync(imageUrl, dropPoint);
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                // A newer import or closing the editor cancelled this download.
+                return;
+            }
+            catch (Exception exception) when (exception is HttpRequestException
+                or IOException
+                or NotSupportedException
+                or ArgumentException)
+            {
+                lastException = exception;
+            }
+        }
+
+        if (lastException is not null)
+        {
+            MessageBox.Show(
+                this,
+                lastException.Message,
+                "Add dropped image",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private static bool CanImportDroppedImage(IDataObject data)
+    {
+        return data.GetDataPresent(DataFormats.FileDrop)
+            || data.GetDataPresent(DataFormats.Bitmap)
+            || ImageImportService.HasDroppedImageData(data)
+            || GetDroppedImageUrls(data).Count > 0;
+    }
+
+    internal static IReadOnlyList<string> GetDroppedImageUrls(IDataObject data)
+    {
+        var imageUrls = new List<string>();
+
+        // Browser drags commonly include both the page URL and HTML containing the
+        // actual image URL. Prefer the image source so we do not download and pass
+        // an HTML page to WPF's image decoder.
+        if (TryReadDroppedText(data, DataFormats.Html, out var html))
+        {
+            foreach (Match match in HtmlImageSourceRegex.Matches(html))
+            {
+                if (match.Success
+                    && TryNormalizeHttpUrl(WebUtility.HtmlDecode(match.Groups["url"].Value), out var imageUrl))
+                {
+                    AddUniqueImageUrl(imageUrls, imageUrl);
+                }
+            }
+        }
+
+        foreach (var format in new[]
+        {
+            "UniformResourceLocatorW",
+            "UniformResourceLocator",
+            "text/uri-list",
+            DataFormats.UnicodeText,
+            DataFormats.Text,
+        })
+        {
+            if (TryReadDroppedText(data, format, out var text)
+                && TryNormalizeHttpUrl(text, out var imageUrl))
+            {
+                AddUniqueImageUrl(imageUrls, imageUrl);
+            }
+        }
+
+        return imageUrls;
+    }
+
+    private static void AddUniqueImageUrl(ICollection<string> imageUrls, string imageUrl)
+    {
+        if (!imageUrls.Contains(imageUrl, StringComparer.OrdinalIgnoreCase))
+        {
+            imageUrls.Add(imageUrl);
+        }
+    }
+
+    private static bool TryReadDroppedText(IDataObject data, string format, out string text)
+    {
+        text = string.Empty;
+        if (!data.GetDataPresent(format))
+        {
+            return false;
+        }
+
+        try
+        {
+            switch (data.GetData(format))
+            {
+                case string stringValue:
+                    text = stringValue;
+                    break;
+                case byte[] bytes:
+                    text = DecodeDroppedText(bytes, format);
+                    break;
+                case MemoryStream stream:
+                {
+                    var originalPosition = stream.Position;
+                    stream.Position = 0;
+                    var bytesFromStream = stream.ToArray();
+                    stream.Position = originalPosition;
+                    text = DecodeDroppedText(bytesFromStream, format);
+                    break;
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        text = text.Trim('\0', ' ', '\r', '\n', '\t');
+        return !string.IsNullOrWhiteSpace(text);
+    }
+
+    private static string DecodeDroppedText(byte[] bytes, string format)
+    {
+        var encoding = format.EndsWith("W", StringComparison.OrdinalIgnoreCase)
+            ? Encoding.Unicode
+            : Encoding.UTF8;
+        return encoding.GetString(bytes);
+    }
+
+    private static bool TryNormalizeHttpUrl(string candidate, out string imageUrl)
+    {
+        foreach (var line in candidate.Split(['\r', '\n', '\0'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            var value = line.Trim().Trim('"', '\'');
+            if (Uri.TryCreate(value, UriKind.Absolute, out var uri)
+                && uri.Scheme is "http" or "https")
+            {
+                imageUrl = uri.AbsoluteUri;
+                return true;
+            }
+        }
+
+        imageUrl = string.Empty;
+        return false;
+    }
+
+    private void ImportImageFiles(IEnumerable<string> filePaths, Point center)
+    {
+        var importedCount = 0;
+        var failures = new List<string>();
+        ActivateSelectTool();
+        CommitInlineTextEditing();
+
+        foreach (var path in filePaths.Where(File.Exists))
+        {
+            try
+            {
+                var image = ImageImportService.LoadFile(path);
+                var offsetCenter = center + new Vector(importedCount * 24, importedCount * 24);
+                AddImportedImage(image, offsetCenter, path);
+                importedCount++;
+            }
+            catch (Exception exception) when (exception is IOException
+                or UnauthorizedAccessException
+                or NotSupportedException
+                or ArgumentException)
+            {
+                failures.Add($"{System.IO.Path.GetFileName(path)}: {exception.Message}");
+            }
+        }
+
+        if (importedCount > 0)
+        {
+            CommitHistoryState();
+            RefreshCanvas();
+        }
+
+        if (failures.Count > 0)
+        {
+            MessageBox.Show(
+                this,
+                string.Join(Environment.NewLine, failures),
+                "Add image",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private async Task ImportImageUrlAsync(string url, Point center)
+    {
+        _imageImportCts?.Cancel();
+        _imageImportCts?.Dispose();
+        var cancellation = new CancellationTokenSource();
+        _imageImportCts = cancellation;
+
+        try
+        {
+            var image = await ImageImportService.LoadUrlAsync(url, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            AddImportedImage(image, center, url);
+            CommitHistoryState();
+            RefreshCanvas();
+        }
+        finally
+        {
+            if (ReferenceEquals(_imageImportCts, cancellation))
+            {
+                _imageImportCts = null;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void AddImportedImage(BitmapSource image, Point center, string source)
+    {
+        ActivateSelectTool();
+        CommitInlineTextEditing();
+
+        var annotation = new ImageAnnotation(
+            image,
+            CreateImportedImageBounds(image, center),
+            source);
+        _annotations.Add(annotation);
+        _selectedAnnotation = annotation;
+        _hoveredAnnotation = annotation;
+        _contextMenuAnnotation = annotation;
+        UpdateSelectionAnnotationControls(annotation);
+    }
+
+    private Rect CreateImportedImageBounds(BitmapSource image, Point center)
+    {
+        var artworkBounds = GetActiveArtworkBounds();
+        var imageWidth = image.Width > 0 ? image.Width : image.PixelWidth;
+        var imageHeight = image.Height > 0 ? image.Height : image.PixelHeight;
+        var maxWidth = Math.Max(1, artworkBounds.Width * 0.60);
+        var maxHeight = Math.Max(1, artworkBounds.Height * 0.60);
+        var scale = Math.Min(1, Math.Min(maxWidth / imageWidth, maxHeight / imageHeight));
+        var width = Math.Max(1, imageWidth * scale);
+        var height = Math.Max(1, imageHeight * scale);
+        var left = Math.Clamp(center.X - (width / 2), artworkBounds.Left, Math.Max(artworkBounds.Left, artworkBounds.Right - width));
+        var top = Math.Clamp(center.Y - (height / 2), artworkBounds.Top, Math.Max(artworkBounds.Top, artworkBounds.Bottom - height));
+        return new Rect(left, top, width, height);
+    }
+
+    private Point GetDefaultImageImportCenter()
+    {
+        var artworkBounds = GetActiveArtworkBounds();
+        return new Point(
+            artworkBounds.Left + (artworkBounds.Width / 2),
+            artworkBounds.Top + (artworkBounds.Height / 2));
+    }
+
+    private Rect GetActiveArtworkBounds()
+    {
+        return _appliedCropRect is { } cropRect
+            ? NormalizeCropRect(cropRect)
+            : new Rect(0, 0, _workingImage.Width, _workingImage.Height);
+    }
+
+    private void ClearSelectionBeforeExport()
+    {
+        CommitInlineTextEditing();
+        DeselectSelectedAnnotation();
     }
 
     private void ShowPreview(BitmapSource bitmap)
@@ -1858,8 +2566,12 @@ public partial class EditorWindow : Window
 
     private void UpdateSelectionAnnotationControls(AnnotationBase? annotation)
     {
+        ColorActionPanel.Visibility = annotation is ImageAnnotation ? Visibility.Collapsed : Visibility.Visible;
+        UpdateImageResizeControls(annotation as ImageAnnotation);
         UpdateArrowAnnotationControls(annotation as ArrowAnnotation);
         UpdateObjectStyleControls(annotation);
+        UpdateShapeBackgroundOpacityControls(annotation);
+        UpdateCornerRoundnessControls(annotation);
         UpdateTextAnnotationControls(annotation as TextAnnotation);
         UpdateObscureAnnotationControls(annotation as ObscureAnnotation);
         UpdateHighlightAnnotationControls(annotation as HighlightAnnotation);
@@ -2631,6 +3343,37 @@ public partial class EditorWindow : Window
         _isUpdatingTextAlignment = false;
     }
 
+    private void UpdateShapeBackgroundOpacityControls(AnnotationBase? annotation)
+    {
+        var shapeAnnotation = annotation as IShapeBackgroundAnnotation;
+        ShapeBackgroundOpacityPanel.Visibility = shapeAnnotation is null ? Visibility.Collapsed : Visibility.Visible;
+        if (shapeAnnotation is null)
+        {
+            return;
+        }
+
+        _isUpdatingShapeBackgroundOpacity = true;
+        var opacityPercent = Math.Round(shapeAnnotation.BackgroundOpacity * 100);
+        ShapeBackgroundOpacitySlider.Value = opacityPercent;
+        ShapeBackgroundOpacityValueText.Text = $"{(int)opacityPercent}%";
+        _isUpdatingShapeBackgroundOpacity = false;
+    }
+
+    private void UpdateCornerRoundnessControls(AnnotationBase? annotation)
+    {
+        var roundedAnnotation = annotation as IRoundedCornerAnnotation;
+        CornerRoundnessPanel.Visibility = roundedAnnotation is null ? Visibility.Collapsed : Visibility.Visible;
+        if (roundedAnnotation is null)
+        {
+            return;
+        }
+
+        _isUpdatingCornerRoundness = true;
+        CornerRoundnessSlider.Value = roundedAnnotation.CornerRadius;
+        CornerRoundnessValueLabel.Text = $"{Math.Round(roundedAnnotation.CornerRadius):0} px";
+        _isUpdatingCornerRoundness = false;
+    }
+
     private void UpdateObjectStyleControls(AnnotationBase? annotation)
     {
         var styleAnnotation = annotation is ArrowAnnotation ? null : annotation as IBorderShadowAnnotation;
@@ -2654,7 +3397,7 @@ public partial class EditorWindow : Window
 
     private void UpdateObjectScaleControls(AnnotationBase? annotation)
     {
-        var shouldShowScale = annotation is not null;
+        var shouldShowScale = annotation is not null and not ImageAnnotation;
         ObjectScalePanel.Visibility = shouldShowScale ? Visibility.Visible : Visibility.Collapsed;
         if (annotation is null)
         {
@@ -2672,6 +3415,75 @@ public partial class EditorWindow : Window
         {
             _isUpdatingObjectScale = false;
         }
+    }
+
+    private void UpdateImageResizeControls(ImageAnnotation? imageAnnotation)
+    {
+        _isUpdatingImageResize = true;
+        try
+        {
+            var isAspectRatioLocked = imageAnnotation?.IsAspectRatioLocked
+                ?? _isBaseImageAspectRatioLocked;
+            ImageResizeSlider.Value = ClampObjectSize(
+                imageAnnotation?.Scale
+                ?? (_workingImage.PixelWidth / (double)Math.Max(1, _baseImageOriginal.PixelWidth)));
+            ImageAspectRatioLockButton.IsChecked = isAspectRatioLocked;
+            ImageAspectRatioLockGlyph.Text = isAspectRatioLocked ? "\uE72E" : "\uE785";
+            ImageAspectRatioLockLabel.Text = isAspectRatioLocked ? "Ratio locked" : "Ratio unlocked";
+            ImageAspectRatioLockButton.ToolTip = isAspectRatioLocked
+                ? "Aspect ratio locked"
+                : "Aspect ratio unlocked";
+            ImageResizeValidationText.Visibility = Visibility.Collapsed;
+            if (imageAnnotation is not null)
+            {
+                UpdateImageResizeValues(imageAnnotation);
+            }
+            else
+            {
+                UpdateImageResizeValues();
+            }
+        }
+        finally
+        {
+            _isUpdatingImageResize = false;
+        }
+    }
+
+    private void UpdateImageResizeValues(ImageAnnotation imageAnnotation)
+    {
+        if (ImageResizeValueLabel is null || ImageWidthTextBox is null || ImageHeightTextBox is null)
+        {
+            return;
+        }
+
+        var bounds = new Rect(imageAnnotation.Bounds.TopLeft, imageAnnotation.Bounds.BottomRight);
+        var width = Math.Round(bounds.Width);
+        var height = Math.Round(bounds.Height);
+        var sizePercent = Math.Round(Math.Max(0.01, imageAnnotation.Scale) * 100);
+        ImageResizeValueLabel.Text = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{sizePercent:0}% · {width:0} × {height:0} px");
+        ImageWidthTextBox.Text = width.ToString("0", CultureInfo.CurrentCulture);
+        ImageHeightTextBox.Text = height.ToString("0", CultureInfo.CurrentCulture);
+    }
+
+    private void UpdateImageResizeValues()
+    {
+        if (ImageResizeValueLabel is null || ImageWidthTextBox is null || ImageHeightTextBox is null)
+        {
+            return;
+        }
+
+        var size = GetBaseImageResizePixelSize();
+        var width = Math.Round(size.Width);
+        var height = Math.Round(size.Height);
+        var sizePercent = Math.Round(
+            (_workingImage.PixelWidth / (double)Math.Max(1, _baseImageOriginal.PixelWidth)) * 100);
+        ImageResizeValueLabel.Text = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{sizePercent:0}% · {width:0} × {height:0} px");
+        ImageWidthTextBox.Text = width.ToString("0", CultureInfo.CurrentCulture);
+        ImageHeightTextBox.Text = height.ToString("0", CultureInfo.CurrentCulture);
     }
 
     private void UpdateHighlightAnnotationControls(HighlightAnnotation? highlightAnnotation)
@@ -2759,6 +3571,8 @@ public partial class EditorWindow : Window
                 var annotation = new RectangleAnnotation { Bounds = new Rect(point, point) };
                 ApplyLastUsedObjectSize(annotation);
                 annotation.SetColor(_lastShapeColor);
+                annotation.SetBackgroundOpacity(_lastShapeBackgroundOpacity);
+                annotation.SetCornerRadius(_lastFrameCornerRadius);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
                 _dragOperation = DragOperation.Draw;
@@ -2769,6 +3583,7 @@ public partial class EditorWindow : Window
                 var annotation = new EllipseAnnotation { Bounds = new Rect(point, point) };
                 ApplyLastUsedObjectSize(annotation);
                 annotation.SetColor(_lastShapeColor);
+                annotation.SetBackgroundOpacity(_lastShapeBackgroundOpacity);
                 _annotations.Add(annotation);
                 _selectedAnnotation = annotation;
                 _dragOperation = DragOperation.Draw;
@@ -2813,6 +3628,7 @@ public partial class EditorWindow : Window
         textAnnotation.SetFontSize(_lastTextFontSize);
         textAnnotation.SetBackgroundOpacity(_lastTextBackgroundOpacity);
         textAnnotation.SetBackgroundColorStrength(_lastTextBackgroundStrength);
+        textAnnotation.SetCornerRadius(_lastTextCornerRadius);
         textAnnotation.SetTextAlignment(_lastTextAlignment);
         textAnnotation.SetBold(_lastTextIsBold);
         ApplyLastUsedObjectSize(textAnnotation);
@@ -2993,6 +3809,12 @@ public partial class EditorWindow : Window
 
     private bool ShouldConstrainAspectRatio()
     {
+        if (_selectedAnnotation is ImageAnnotation imageAnnotation)
+        {
+            return imageAnnotation.IsAspectRatioLocked
+                || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+        }
+
         return Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)
             && (_selectedAnnotation is RectangleAnnotation or EllipseAnnotation or ObscureAnnotation
                 or ArrowAnnotation
@@ -3060,6 +3882,113 @@ public partial class EditorWindow : Window
     {
         _workingImage = bitmapSource;
         UpdateArtworkViewport();
+    }
+
+    private Size GetBaseImageResizePixelSize()
+    {
+        if (_appliedCropRect is { } cropRect)
+        {
+            var normalized = NormalizeCropRect(cropRect);
+            return new Size(
+                Math.Max(1, normalized.Width * (_workingImage.DpiX / 96.0)),
+                Math.Max(1, normalized.Height * (_workingImage.DpiY / 96.0)));
+        }
+
+        return new Size(_workingImage.PixelWidth, _workingImage.PixelHeight);
+    }
+
+    private void ResizeBaseImageViewport(double targetWidth, double targetHeight)
+    {
+        var currentSize = GetBaseImageResizePixelSize();
+        var scaleX = targetWidth / Math.Max(1, currentSize.Width);
+        var scaleY = targetHeight / Math.Max(1, currentSize.Height);
+        ResizeBaseImageFullDimensions(
+            Math.Max(1, (int)Math.Round(_workingImage.PixelWidth * scaleX)),
+            Math.Max(1, (int)Math.Round(_workingImage.PixelHeight * scaleY)));
+    }
+
+    private void ResizeBaseImageFullDimensions(int targetWidth, int targetHeight)
+    {
+        targetWidth = Math.Clamp(targetWidth, 1, (int)ImageAnnotation.MaximumSize);
+        targetHeight = Math.Clamp(targetHeight, 1, (int)ImageAnnotation.MaximumSize);
+        if (_workingImage.PixelWidth == targetWidth && _workingImage.PixelHeight == targetHeight)
+        {
+            return;
+        }
+
+        var oldWidth = Math.Max(0.001, _workingImage.Width);
+        var oldHeight = Math.Max(0.001, _workingImage.Height);
+        var resizedImage = ResizeBitmapSource(_baseImageOriginal, targetWidth, targetHeight);
+        var scaleX = resizedImage.Width / oldWidth;
+        var scaleY = resizedImage.Height / oldHeight;
+
+        foreach (var annotation in _annotations)
+        {
+            annotation.ScaleDocument(scaleX, scaleY);
+        }
+
+        if (_appliedCropRect is { } appliedCropRect)
+        {
+            _appliedCropRect = ScaleDocumentRect(appliedCropRect, scaleX, scaleY);
+        }
+
+        if (_lastCropSelection is { } lastCropSelection)
+        {
+            _lastCropSelection = ScaleDocumentRect(lastCropSelection, scaleX, scaleY);
+        }
+
+        ApplyWorkingImage(resizedImage);
+    }
+
+    internal static BitmapSource ResizeBitmapSource(BitmapSource source, int targetWidth, int targetHeight)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        targetWidth = Math.Max(1, targetWidth);
+        targetHeight = Math.Max(1, targetHeight);
+        if (source.PixelWidth == targetWidth && source.PixelHeight == targetHeight)
+        {
+            return source;
+        }
+
+        var dpiX = source.DpiX > 0 ? source.DpiX : 96;
+        var dpiY = source.DpiY > 0 ? source.DpiY : 96;
+        var drawingVisual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(drawingVisual, BitmapScalingMode.HighQuality);
+        using (var drawingContext = drawingVisual.RenderOpen())
+        {
+            drawingContext.DrawImage(
+                source,
+                new Rect(
+                    0,
+                    0,
+                    targetWidth * (96.0 / dpiX),
+                    targetHeight * (96.0 / dpiY)));
+        }
+
+        var resized = new RenderTargetBitmap(
+            targetWidth,
+            targetHeight,
+            dpiX,
+            dpiY,
+            PixelFormats.Pbgra32);
+        resized.Render(drawingVisual);
+        resized.Freeze();
+        return resized;
+    }
+
+    private static Rect ScaleDocumentRect(Rect rect, double scaleX, double scaleY)
+    {
+        var normalized = NormalizeCropRect(rect);
+        return new Rect(
+            normalized.X * scaleX,
+            normalized.Y * scaleY,
+            normalized.Width * scaleX,
+            normalized.Height * scaleY);
+    }
+
+    private static double GetAspectRatio(double width, double height)
+    {
+        return Math.Max(0.001, width / Math.Max(0.001, height));
     }
 
     private void BeginInlineTextEditing(TextAnnotation textAnnotation, bool selectAll)
@@ -3290,6 +4219,9 @@ public partial class EditorWindow : Window
 
         InlineTextEditorBorder.Background = AnnotationBase.MakeBrush(_editingTextAnnotation.GetBackgroundTint(isHovered: true));
         InlineTextEditorBorder.BorderBrush = AnnotationBase.MakeBrush(_editingTextAnnotation.GetFrameColor(isHovered: true));
+        InlineTextEditorBorder.CornerRadius = new CornerRadius(_editingTextAnnotation.CornerRadius);
+        InlineTextBackdrop.RadiusX = _editingTextAnnotation.CornerRadius;
+        InlineTextBackdrop.RadiusY = _editingTextAnnotation.CornerRadius;
         InlineTextEditor.Foreground = AnnotationBase.MakeBrush(_editingTextAnnotation.GetForegroundColor());
 
         InlineTextPopup.IsOpen = true;
@@ -3351,14 +4283,18 @@ public partial class EditorWindow : Window
 
         var cropOffsetX = _appliedCropRect is { } cropRect ? NormalizeCropRect(cropRect).X : 0;
         var cropOffsetY = _appliedCropRect is { } activeCropRect ? NormalizeCropRect(activeCropRect).Y : 0;
-        var left = _capturedCursor.Left - cropOffsetX;
-        var top = _capturedCursor.Top - cropOffsetY;
-        var cursorBounds = new Rect(left, top, _capturedCursor.Image.Width, _capturedCursor.Image.Height);
+        var documentScaleX = _workingImage.Width / Math.Max(0.001, _baseImageOriginal.Width);
+        var documentScaleY = _workingImage.Height / Math.Max(0.001, _baseImageOriginal.Height);
+        var left = (_capturedCursor.Left * documentScaleX) - cropOffsetX;
+        var top = (_capturedCursor.Top * documentScaleY) - cropOffsetY;
+        var cursorWidth = _capturedCursor.Image.Width * documentScaleX;
+        var cursorHeight = _capturedCursor.Image.Height * documentScaleY;
+        var cursorBounds = new Rect(left, top, cursorWidth, cursorHeight);
         var artworkBounds = new Rect(0, 0, ArtworkSurface.Width, ArtworkSurface.Height);
 
         CapturedCursorImage.Source = _capturedCursor.Image;
-        CapturedCursorImage.Width = _capturedCursor.Image.Width;
-        CapturedCursorImage.Height = _capturedCursor.Image.Height;
+        CapturedCursorImage.Width = cursorWidth;
+        CapturedCursorImage.Height = cursorHeight;
         CapturedCursorImage.RenderTransform = new TranslateTransform(left, top);
         CapturedCursorImage.Visibility = _isCapturedCursorVisible && cursorBounds.IntersectsWith(artworkBounds)
             ? Visibility.Visible
@@ -3819,7 +4755,8 @@ public partial class EditorWindow : Window
             _workingImage,
             _annotations.Select(annotation => annotation.Clone()).ToList(),
             _appliedCropRect,
-            cropRect ?? _lastCropSelection);
+            cropRect ?? _lastCropSelection,
+            _isBaseImageAspectRatioLocked);
     }
 
     private void CommitHistoryState()
@@ -3881,8 +4818,12 @@ public partial class EditorWindow : Window
         _annotations.AddRange(state.Annotations.Select(annotation => annotation.Clone()));
         _appliedCropRect = state.AppliedCropRect;
         _lastCropSelection = state.LastCropSelection;
+        _isBaseImageAspectRatioLocked = state.IsBaseImageAspectRatioLocked;
         ApplyWorkingImage(state.Image);
+        var baseSize = GetBaseImageResizePixelSize();
+        _baseImageLockedAspectRatio = GetAspectRatio(baseSize.Width, baseSize.Height);
         ResetTransientEditorState();
+        UpdateImageResizeControls(null);
     }
 
     private void ResetTransientEditorState()
@@ -4103,8 +5044,10 @@ public partial class EditorWindow : Window
     {
         var annotationSignature = string.Join("|", state.Annotations.Select(CreateAnnotationSignature));
         return string.Join(";",
+            $"{state.Image.PixelWidth}x{state.Image.PixelHeight}",
             RectToSignature(state.AppliedCropRect),
             RectToSignature(state.LastCropSelection),
+            state.IsBaseImageAspectRatioLocked,
             annotationSignature);
     }
 
@@ -4112,9 +5055,10 @@ public partial class EditorWindow : Window
     {
         return annotation switch
         {
-            RectangleAnnotation rectangle => $"rect:{RectToSignature(rectangle.Bounds)}:{ColorToSignature(rectangle.StrokeColor)}:{FormatDouble(rectangle.ShadowStrength)}:{FormatDouble(rectangle.BorderWidth)}",
-            EllipseAnnotation ellipse => $"ellipse:{RectToSignature(ellipse.Bounds)}:{ColorToSignature(ellipse.StrokeColor)}:{FormatDouble(ellipse.ShadowStrength)}:{FormatDouble(ellipse.BorderWidth)}",
-            TextAnnotation text => $"text:{PointToSignature(text.Location)}:{FormatDouble(text.BoxWidth)}:{FormatDouble(text.FontSize)}:{FormatDouble(text.BackgroundOpacity)}:{FormatDouble(text.BackgroundColorStrength)}:{FormatDouble(text.ShadowStrength)}:{FormatDouble(text.BorderWidth)}:{ColorToSignature(text.TextColor)}:{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text.Text ?? string.Empty))}:{text.TextAlignment}:{text.IsBold}",
+            RectangleAnnotation rectangle => $"rect:{RectToSignature(rectangle.Bounds)}:{ColorToSignature(rectangle.StrokeColor)}:{FormatDouble(rectangle.BackgroundOpacity)}:{FormatDouble(rectangle.CornerRadius)}:{FormatDouble(rectangle.ShadowStrength)}:{FormatDouble(rectangle.BorderWidth)}",
+            EllipseAnnotation ellipse => $"ellipse:{RectToSignature(ellipse.Bounds)}:{ColorToSignature(ellipse.StrokeColor)}:{FormatDouble(ellipse.BackgroundOpacity)}:{FormatDouble(ellipse.ShadowStrength)}:{FormatDouble(ellipse.BorderWidth)}",
+            ImageAnnotation image => $"image:{image.ImportId:N}:{RectToSignature(image.Bounds)}:{FormatDouble(image.Scale)}:{image.IsAspectRatioLocked}",
+            TextAnnotation text => $"text:{PointToSignature(text.Location)}:{FormatDouble(text.BoxWidth)}:{FormatDouble(text.FontSize)}:{FormatDouble(text.BackgroundOpacity)}:{FormatDouble(text.BackgroundColorStrength)}:{FormatDouble(text.CornerRadius)}:{FormatDouble(text.ShadowStrength)}:{FormatDouble(text.BorderWidth)}:{ColorToSignature(text.TextColor)}:{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text.Text ?? string.Empty))}:{text.TextAlignment}:{text.IsBold}",
             ObscureAnnotation obscure => $"obscure:{RectToSignature(obscure.Bounds)}:{FormatDouble(obscure.BlurLevel)}:{FormatDouble(obscure.PixelationLevel)}:{FormatDouble(obscure.ColorStrength)}:{FormatDouble(obscure.ShadowStrength)}:{FormatDouble(obscure.BorderWidth)}:{ColorToSignature(obscure.OverlayColor)}",
             ArrowAnnotation arrow => $"arrow:{PointToSignature(arrow.Start)}:{PointToSignature(arrow.End)}:{string.Join(",", arrow.BendPoints.Select(PointToSignature))}:{FormatDouble(arrow.ShaftThickness)}:{FormatDouble(arrow.HeadLength)}:{FormatDouble(arrow.HeadWidth)}:{FormatDouble(arrow.OuterEdgeWidth)}:{FormatDouble(arrow.InnerEdgeWidth)}:{FormatDouble(arrow.TailSweep)}:{FormatDouble(arrow.HeadSkew)}:{FormatDouble(arrow.TailScale)}:{FormatDouble(arrow.BodyScale)}:{FormatDouble(arrow.FrontScale)}:{FormatDouble(arrow.HeadScale)}:{FormatDouble(arrow.TailHeadScale)}:{FormatDouble(arrow.TailRoundness)}:{FormatDouble(arrow.HeadRoundness)}:{FormatDouble(arrow.ShadowStrength)}:{FormatDouble(arrow.BorderWidth)}:{arrow.HasStartHead}:{arrow.HasEndHead}:{ColorToSignature(arrow.StrokeColor)}:{arrow.Style}",
             HighlightAnnotation highlight => $"highlight:{highlight.Mode}:{RectToSignature(highlight.Bounds)}:{string.Join(",", highlight.Points.Select(PointToSignature))}:{ColorToSignature(highlight.HighlightColor)}:{FormatDouble(highlight.ColorStrength)}:{FormatDouble(highlight.ShadowStrength)}:{FormatDouble(highlight.BorderWidth)}",
@@ -4152,6 +5096,8 @@ public partial class EditorWindow : Window
         }
 
         _lastShapeColor = ParseColorOrDefault(preferences.ShapeColor, DefaultAccentColor);
+        _lastShapeBackgroundOpacity = Math.Clamp(preferences.ShapeBackgroundOpacity ?? DefaultShapeBackgroundOpacity, 0, 1);
+        _lastFrameCornerRadius = Math.Round(Math.Clamp(preferences.FrameCornerRadius ?? DefaultFrameCornerRadius, 0, 100));
         _lastArrowColor = ParseColorOrDefault(preferences.ArrowColor, DefaultArrowColor);
         if (_lastArrowColor == LegacyDefaultArrowColor)
         {
@@ -4219,6 +5165,7 @@ public partial class EditorWindow : Window
         _lastTextFontSize = preferences.TextFontSize > 0 ? preferences.TextFontSize : DefaultTextFontSize;
         _lastTextBackgroundOpacity = Math.Clamp(preferences.TextBackgroundOpacity, 0, 1);
         _lastTextBackgroundStrength = Math.Clamp(preferences.TextBackgroundStrength, 0, 1);
+        _lastTextCornerRadius = Math.Round(Math.Clamp(preferences.TextCornerRadius ?? DefaultTextCornerRadius, 0, 100));
         _lastHighlightStrength = Math.Clamp(preferences.HighlightStrength ?? DefaultHighlightStrength, 0, 1);
         var hasObscureColorStrengthPreference = preferences.ObscureColorStrength.HasValue;
         var savedObscureColor = ParseColorOrDefault(preferences.ObscureColor, DefaultObscureColor);
@@ -4269,6 +5216,8 @@ public partial class EditorWindow : Window
         _preferencesStore.Save(new EditorPreferences(
             ThemePreference: _themePreference.ToString(),
             ShapeColor: ToPreferenceColor(_lastShapeColor),
+            ShapeBackgroundOpacity: _lastShapeBackgroundOpacity,
+            FrameCornerRadius: _lastFrameCornerRadius,
             ArrowColor: ToPreferenceColor(_lastArrowColor),
             ArrowStyle: _lastArrowStyle.ToString(),
             ArrowShapePresets: _arrowShapePresets.Select(NormalizeArrowPreset).ToList(),
@@ -4293,6 +5242,7 @@ public partial class EditorWindow : Window
             TextFontSize: _lastTextFontSize,
             TextBackgroundOpacity: _lastTextBackgroundOpacity,
             TextBackgroundStrength: _lastTextBackgroundStrength,
+            TextCornerRadius: _lastTextCornerRadius,
             HighlightStrength: _lastHighlightStrength,
             ObscureColor: ToPreferenceColor(_lastObscureColor),
                 ObscureMode: _lastObscureMode.ToString(),
@@ -4484,7 +5434,12 @@ public partial class EditorWindow : Window
             GlowEnd: Color.FromArgb(0x00, 0x00, 0x00, 0x00));
     }
 
-    private sealed record EditorDocumentState(BitmapSource Image, List<AnnotationBase> Annotations, Rect? AppliedCropRect, Rect? LastCropSelection);
+    private sealed record EditorDocumentState(
+        BitmapSource Image,
+        List<AnnotationBase> Annotations,
+        Rect? AppliedCropRect,
+        Rect? LastCropSelection,
+        bool IsBaseImageAspectRatioLocked);
 }
 
 internal enum ObscureMode
@@ -4516,6 +5471,20 @@ internal interface IBorderShadowAnnotation
     void SetShadowStrength(double value);
 
     void SetBorderWidth(double value);
+}
+
+internal interface IShapeBackgroundAnnotation
+{
+    double BackgroundOpacity { get; }
+
+    void SetBackgroundOpacity(double value);
+}
+
+internal interface IRoundedCornerAnnotation
+{
+    double CornerRadius { get; }
+
+    void SetCornerRadius(double value);
 }
 
 internal abstract class AnnotationBase
@@ -4570,6 +5539,8 @@ internal abstract class AnnotationBase
     public abstract string? HitHandle(Point point);
 
     public abstract void Move(Vector delta);
+
+    public abstract void ScaleDocument(double scaleX, double scaleY);
 
     public abstract void MoveHandle(string handle, Point point, bool constrainToSquare);
 
@@ -4784,11 +5755,30 @@ internal abstract class AnnotationBase
             ? WithAlpha(Colors.White, 214)
             : WithAlpha(Colors.Black, 185);
     }
+
+    protected static Point ScaleDocumentPoint(Point point, double scaleX, double scaleY)
+    {
+        return new Point(point.X * scaleX, point.Y * scaleY);
+    }
+
+    protected static Rect ScaleDocumentBounds(Rect bounds, double scaleX, double scaleY)
+    {
+        var normalized = new Rect(bounds.TopLeft, bounds.BottomRight);
+        return new Rect(
+            normalized.X * scaleX,
+            normalized.Y * scaleY,
+            normalized.Width * scaleX,
+            normalized.Height * scaleY);
+    }
 }
 
-internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotation
+internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotation, IShapeBackgroundAnnotation, IRoundedCornerAnnotation
 {
     public Color StrokeColor { get; private set; } = EditorWindow.DefaultAccentColor;
+
+    public double BackgroundOpacity { get; private set; } = EditorWindow.DefaultShapeBackgroundOpacity;
+
+    public double CornerRadius { get; private set; } = EditorWindow.DefaultFrameCornerRadius;
 
     public double ShadowStrength { get; private set; } = EditorWindow.DefaultShapeShadowStrength;
 
@@ -4800,13 +5790,15 @@ internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotat
     {
         var normalized = Normalize(Bounds);
         var strokeBrush = MakeBrush(isHovered ? Darken(StrokeColor, 0.24) : StrokeColor);
-        var fillBrush = MakeBrush(WithAlpha(StrokeColor, (byte)(isHovered ? 52 : 28)));
+        var fillOpacity = Math.Clamp(BackgroundOpacity + (isHovered ? 0.08 : 0), 0, 1);
+        var fillBrush = MakeBrush(WithAlpha(StrokeColor, (byte)Math.Round(fillOpacity * 255)));
+        var cornerRadius = GetRenderedCornerRadius(normalized);
         var rectangle = new Rectangle
         {
             Width = normalized.Width,
             Height = normalized.Height,
-            RadiusX = 14,
-            RadiusY = 14,
+            RadiusX = cornerRadius,
+            RadiusY = cornerRadius,
             Stroke = BorderWidth > 0.001 ? strokeBrush : Brushes.Transparent,
             Fill = fillBrush,
             StrokeThickness = BorderWidth,
@@ -4818,7 +5810,7 @@ internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotat
 
         if (isSelected)
         {
-            AddMarchingAntsRectangle(canvas, normalized, 14, 14);
+            AddMarchingAntsRectangle(canvas, normalized, cornerRadius, cornerRadius);
         }
 
         if (isSelected)
@@ -4854,6 +5846,11 @@ internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotat
         Bounds = new Rect(Bounds.TopLeft + delta, Bounds.BottomRight + delta);
     }
 
+    public override void ScaleDocument(double scaleX, double scaleY)
+    {
+        Bounds = ScaleDocumentBounds(Bounds, scaleX, scaleY);
+    }
+
     public override void MoveHandle(string handle, Point point, bool constrainToSquare)
     {
         var normalized = Normalize(Bounds);
@@ -4887,6 +5884,16 @@ internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotat
         ShadowStrength = Math.Clamp(value, 0, 1);
     }
 
+    public void SetBackgroundOpacity(double value)
+    {
+        BackgroundOpacity = Math.Clamp(value, 0, 1);
+    }
+
+    public void SetCornerRadius(double value)
+    {
+        CornerRadius = Math.Clamp(value, 0, 100);
+    }
+
     public void SetBorderWidth(double value)
     {
         BorderWidth = Math.Clamp(value, 0, 12);
@@ -4908,9 +5915,16 @@ internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotat
             Scale = Scale,
         };
         clone.SetColor(StrokeColor);
+        clone.SetBackgroundOpacity(BackgroundOpacity);
+        clone.SetCornerRadius(CornerRadius);
         clone.SetShadowStrength(ShadowStrength);
         clone.SetBorderWidth(BorderWidth);
         return clone;
+    }
+
+    private double GetRenderedCornerRadius(Rect bounds)
+    {
+        return Math.Min(CornerRadius, Math.Min(bounds.Width, bounds.Height) / 2);
     }
 
     private static Rect Normalize(Rect rect)
@@ -4919,9 +5933,11 @@ internal sealed class RectangleAnnotation : AnnotationBase, IBorderShadowAnnotat
     }
 }
 
-internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotation
+internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotation, IShapeBackgroundAnnotation
 {
     public Color StrokeColor { get; private set; } = EditorWindow.DefaultAccentColor;
+
+    public double BackgroundOpacity { get; private set; } = EditorWindow.DefaultShapeBackgroundOpacity;
 
     public double ShadowStrength { get; private set; } = EditorWindow.DefaultShapeShadowStrength;
 
@@ -4938,7 +5954,9 @@ internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotatio
             Width = normalized.Width,
             Height = normalized.Height,
             Stroke = BorderWidth > 0.001 ? strokeBrush : Brushes.Transparent,
-            Fill = MakeBrush(WithAlpha(StrokeColor, (byte)(isHovered ? 26 : 10))),
+            Fill = MakeBrush(WithAlpha(
+                StrokeColor,
+                (byte)Math.Round(Math.Clamp(BackgroundOpacity + (isHovered ? 0.08 : 0), 0, 1) * 255))),
             StrokeThickness = BorderWidth,
         };
         ApplyStrongShadow(ellipse, ShadowStrength);
@@ -4984,6 +6002,11 @@ internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotatio
         Bounds = new Rect(Bounds.TopLeft + delta, Bounds.BottomRight + delta);
     }
 
+    public override void ScaleDocument(double scaleX, double scaleY)
+    {
+        Bounds = ScaleDocumentBounds(Bounds, scaleX, scaleY);
+    }
+
     public override void MoveHandle(string handle, Point point, bool constrainToSquare)
     {
         var normalized = Normalize(Bounds);
@@ -5017,6 +6040,11 @@ internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotatio
         ShadowStrength = Math.Clamp(value, 0, 1);
     }
 
+    public void SetBackgroundOpacity(double value)
+    {
+        BackgroundOpacity = Math.Clamp(value, 0, 1);
+    }
+
     public void SetBorderWidth(double value)
     {
         BorderWidth = Math.Clamp(value, 0, 12);
@@ -5038,6 +6066,7 @@ internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotatio
             Scale = Scale,
         };
         clone.SetColor(StrokeColor);
+        clone.SetBackgroundOpacity(BackgroundOpacity);
         clone.SetShadowStrength(ShadowStrength);
         clone.SetBorderWidth(BorderWidth);
         return clone;
@@ -5049,7 +6078,283 @@ internal sealed class EllipseAnnotation : AnnotationBase, IBorderShadowAnnotatio
     }
 }
 
-internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
+internal sealed class ImageAnnotation : AnnotationBase
+{
+    internal const double MinimumSize = 18;
+    internal const double MaximumSize = 10000;
+    private Size _defaultSize;
+    private double _lockedAspectRatio;
+
+    public ImageAnnotation(BitmapSource image, Rect bounds, string source)
+        : this(image, bounds, source, Guid.NewGuid(), Normalize(bounds).Size)
+    {
+    }
+
+    private ImageAnnotation(BitmapSource image, Rect bounds, string source, Guid importId, Size defaultSize)
+    {
+        Image = FreezeImage(image);
+        Bounds = Normalize(bounds);
+        Source = source;
+        ImportId = importId;
+        _defaultSize = defaultSize;
+        _lockedAspectRatio = GetAspectRatio(defaultSize.Width, defaultSize.Height);
+    }
+
+    public BitmapSource Image { get; }
+
+    public Rect Bounds { get; set; }
+
+    public string Source { get; }
+
+    public Guid ImportId { get; }
+
+    public bool IsAspectRatioLocked { get; private set; } = true;
+
+    public override void Render(Canvas canvas, bool isSelected, bool isHovered)
+    {
+        var normalized = Normalize(Bounds);
+        var imageElement = new System.Windows.Controls.Image
+        {
+            Source = Image,
+            Width = normalized.Width,
+            Height = normalized.Height,
+            Stretch = Stretch.Fill,
+            SnapsToDevicePixels = true,
+            ToolTip = Source,
+        };
+        RenderOptions.SetBitmapScalingMode(imageElement, BitmapScalingMode.HighQuality);
+        Canvas.SetLeft(imageElement, normalized.Left);
+        Canvas.SetTop(imageElement, normalized.Top);
+        canvas.Children.Add(imageElement);
+
+        if (isHovered && !isSelected)
+        {
+            var hoverBorder = new Rectangle
+            {
+                Width = normalized.Width,
+                Height = normalized.Height,
+                Fill = Brushes.Transparent,
+                Stroke = MakeBrush(WithAlpha(Colors.White, 190)),
+                StrokeThickness = 1.5,
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(hoverBorder, normalized.Left);
+            Canvas.SetTop(hoverBorder, normalized.Top);
+            canvas.Children.Add(hoverBorder);
+        }
+
+        if (!isSelected)
+        {
+            return;
+        }
+
+        AddMarchingAntsRectangle(canvas, normalized, 0, 0);
+        AddHandle(canvas, normalized.TopLeft);
+        AddHandle(canvas, normalized.TopRight);
+        AddHandle(canvas, normalized.BottomLeft);
+        AddHandle(canvas, normalized.BottomRight);
+    }
+
+    public override bool HitTest(Point point)
+    {
+        return Normalize(Bounds).Contains(point);
+    }
+
+    public override string? HitHandle(Point point)
+    {
+        var normalized = Normalize(Bounds);
+        foreach (var handle in new[]
+        {
+            ("TopLeft", normalized.TopLeft),
+            ("TopRight", normalized.TopRight),
+            ("BottomLeft", normalized.BottomLeft),
+            ("BottomRight", normalized.BottomRight),
+        })
+        {
+            if (Distance(handle.Item2, point) <= 10)
+            {
+                return handle.Item1;
+            }
+        }
+
+        return null;
+    }
+
+    public override void Move(Vector delta)
+    {
+        Bounds = new Rect(Bounds.TopLeft + delta, Bounds.BottomRight + delta);
+    }
+
+    public override void ScaleDocument(double scaleX, double scaleY)
+    {
+        Bounds = ScaleDocumentBounds(Bounds, scaleX, scaleY);
+        _defaultSize = new Size(
+            Math.Max(0.001, _defaultSize.Width * scaleX),
+            Math.Max(0.001, _defaultSize.Height * scaleY));
+        _lockedAspectRatio = GetAspectRatio(
+            _lockedAspectRatio * scaleX,
+            scaleY);
+    }
+
+    public override void MoveHandle(string handle, Point point, bool constrainToSquare)
+    {
+        var normalized = Normalize(Bounds);
+        var oppositeCorner = handle switch
+        {
+            "TopLeft" => normalized.BottomRight,
+            "TopRight" => normalized.BottomLeft,
+            "BottomLeft" => normalized.TopRight,
+            "BottomRight" => normalized.TopLeft,
+            _ => normalized.TopLeft,
+        };
+
+        var width = Math.Clamp(Math.Abs(point.X - oppositeCorner.X), MinimumSize, MaximumSize);
+        var height = Math.Clamp(Math.Abs(point.Y - oppositeCorner.Y), MinimumSize, MaximumSize);
+        if (IsAspectRatioLocked || constrainToSquare)
+        {
+            if (width / height > _lockedAspectRatio)
+            {
+                height = Math.Clamp(width / _lockedAspectRatio, MinimumSize, MaximumSize);
+            }
+            else
+            {
+                width = Math.Clamp(height * _lockedAspectRatio, MinimumSize, MaximumSize);
+            }
+        }
+
+        var left = handle.Contains("Left", StringComparison.Ordinal)
+            ? oppositeCorner.X - width
+            : oppositeCorner.X;
+        var top = handle.Contains("Top", StringComparison.Ordinal)
+            ? oppositeCorner.Y - height
+            : oppositeCorner.Y;
+        Bounds = new Rect(left, top, width, height);
+        Scale = width / Math.Max(0.001, _defaultSize.Width);
+    }
+
+    public void SetAspectRatioLocked(bool isLocked)
+    {
+        if (isLocked && !IsAspectRatioLocked)
+        {
+            var normalized = Normalize(Bounds);
+            _lockedAspectRatio = GetAspectRatio(normalized.Width, normalized.Height);
+        }
+
+        IsAspectRatioLocked = isLocked;
+    }
+
+    public void SetWidth(double width)
+    {
+        var normalized = Normalize(Bounds);
+        width = Math.Clamp(width, MinimumSize, MaximumSize);
+        var height = IsAspectRatioLocked
+            ? Math.Clamp(width / _lockedAspectRatio, MinimumSize, MaximumSize)
+            : normalized.Height;
+        SetDimensions(width, height);
+    }
+
+    public void SetHeight(double height)
+    {
+        var normalized = Normalize(Bounds);
+        height = Math.Clamp(height, MinimumSize, MaximumSize);
+        var width = IsAspectRatioLocked
+            ? Math.Clamp(height * _lockedAspectRatio, MinimumSize, MaximumSize)
+            : normalized.Width;
+        SetDimensions(width, height);
+    }
+
+    private void SetDimensions(double width, double height)
+    {
+        var normalized = Normalize(Bounds);
+        var center = new Point(
+            normalized.Left + (normalized.Width / 2),
+            normalized.Top + (normalized.Height / 2));
+        Bounds = new Rect(
+            center.X - (width / 2),
+            center.Y - (height / 2),
+            width,
+            height);
+        Scale = width / Math.Max(0.001, _defaultSize.Width);
+    }
+
+    public override void UpdateFromAnchor(Point anchor, Point current, bool constrainToSquare)
+    {
+        Bounds = new Rect(anchor, current);
+    }
+
+    public override void SetColor(Color color)
+    {
+        // Imported images retain their original colors.
+    }
+
+    public override void ResetScale()
+    {
+        var normalized = Normalize(Bounds);
+        var center = new Point(
+            normalized.Left + (normalized.Width / 2),
+            normalized.Top + (normalized.Height / 2));
+        Bounds = new Rect(
+            center.X - (_defaultSize.Width / 2),
+            center.Y - (_defaultSize.Height / 2),
+            _defaultSize.Width,
+            _defaultSize.Height);
+        Scale = 1;
+    }
+
+    protected override void ScaleGeometricPoints(double relativeScale)
+    {
+        var normalized = Normalize(Bounds);
+        var center = new Point(
+            normalized.Left + (normalized.Width / 2),
+            normalized.Top + (normalized.Height / 2));
+        var width = normalized.Width * relativeScale;
+        var height = normalized.Height * relativeScale;
+        Bounds = new Rect(
+            center.X - (width / 2),
+            center.Y - (height / 2),
+            width,
+            height);
+    }
+
+    public override AnnotationBase Clone()
+    {
+        var clone = new ImageAnnotation(Image, Bounds, Source, ImportId, _defaultSize)
+        {
+            Scale = Scale,
+            IsAspectRatioLocked = IsAspectRatioLocked,
+            _lockedAspectRatio = _lockedAspectRatio,
+        };
+        return clone;
+    }
+
+    private static BitmapSource FreezeImage(BitmapSource image)
+    {
+        if (image.IsFrozen)
+        {
+            return image;
+        }
+
+        var frozenImage = BitmapFrame.Create(image);
+        if (frozenImage.CanFreeze)
+        {
+            frozenImage.Freeze();
+        }
+
+        return frozenImage;
+    }
+
+    private static Rect Normalize(Rect rect)
+    {
+        return new Rect(rect.TopLeft, rect.BottomRight);
+    }
+
+    private static double GetAspectRatio(double width, double height)
+    {
+        return Math.Max(0.001, width / Math.Max(0.001, height));
+    }
+}
+
+internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation, IRoundedCornerAnnotation
 {
     private const double DefaultBoxWidth = 340;
     private const double MinBoxWidth = 64;
@@ -5062,6 +6367,8 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
     public double BackgroundOpacity { get; private set; } = EditorWindow.DefaultTextBackgroundOpacity;
 
     public double BackgroundColorStrength { get; private set; } = EditorWindow.DefaultTextBackgroundStrength;
+
+    public double CornerRadius { get; private set; } = EditorWindow.DefaultTextCornerRadius;
 
     public double ShadowStrength { get; private set; } = EditorWindow.DefaultTextShadowStrength;
 
@@ -5098,7 +6405,8 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
 
         if (isSelected)
         {
-            AddMarchingAntsRectangle(canvas, new Rect(Location, bounds), 10, 10);
+            var cornerRadius = GetRenderedCornerRadius(bounds);
+            AddMarchingAntsRectangle(canvas, new Rect(Location, bounds), cornerRadius, cornerRadius);
         }
 
         if (isSelected)
@@ -5128,6 +6436,16 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
     public override void Move(Vector delta)
     {
         Location += delta;
+    }
+
+    public override void ScaleDocument(double scaleX, double scaleY)
+    {
+        var uniformScale = Math.Sqrt(Math.Max(0.0001, scaleX * scaleY));
+        Location = ScaleDocumentPoint(Location, scaleX, scaleY);
+        BoxWidth = Math.Max(1, BoxWidth * scaleX);
+        FontSize = Math.Max(1, FontSize * uniformScale);
+        CornerRadius = Math.Max(0, CornerRadius * uniformScale);
+        BorderWidth = Math.Max(0, BorderWidth * uniformScale);
     }
 
     public override void MoveHandle(string handle, Point point, bool constrainToSquare)
@@ -5182,6 +6500,11 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
         BackgroundColorStrength = Math.Clamp(strength, 0, 1);
     }
 
+    public void SetCornerRadius(double value)
+    {
+        CornerRadius = Math.Clamp(value, 0, 100);
+    }
+
     public void SetShadowStrength(double value)
     {
         ShadowStrength = Math.Clamp(value, 0, 1);
@@ -5222,6 +6545,7 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
         clone.SetFontSize(FontSize);
         clone.SetBackgroundOpacity(BackgroundOpacity);
         clone.SetBackgroundColorStrength(BackgroundColorStrength);
+        clone.SetCornerRadius(CornerRadius);
         clone.SetShadowStrength(ShadowStrength);
         clone.SetBorderWidth(BorderWidth);
         clone.SetTextAlignment(TextAlignment);
@@ -5244,8 +6568,8 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
 
         var blurLayer = new Rectangle
         {
-            RadiusX = 10,
-            RadiusY = 10,
+            RadiusX = GetRenderedCornerRadius(bounds),
+            RadiusY = GetRenderedCornerRadius(bounds),
             Effect = new BlurEffect { Radius = 14, RenderingBias = RenderingBias.Quality },
             Opacity = 1,
             Fill = CreateBackdropBrush(editorWindow, grid.Width, grid.Height),
@@ -5294,7 +6618,7 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
         return new Border
         {
             Background = MakeBrush(backgroundColor),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(CornerRadius),
             Padding = new Thickness(12, 8, 12, 8),
             BorderThickness = new Thickness(BorderWidth),
             BorderBrush = BorderWidth > 0.001 ? MakeBrush(frameColor) : Brushes.Transparent,
@@ -5316,6 +6640,11 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation
                 Width = BoxWidth,
             },
         };
+    }
+
+    private double GetRenderedCornerRadius(Size bounds)
+    {
+        return Math.Min(CornerRadius, Math.Min(bounds.Width, bounds.Height) / 2);
     }
 
     internal Color GetBackgroundTint(bool isHovered)
@@ -5479,6 +6808,11 @@ internal sealed class ObscureAnnotation : AnnotationBase, IBorderShadowAnnotatio
     public override void Move(Vector delta)
     {
         Bounds = new Rect(Bounds.TopLeft + delta, Bounds.BottomRight + delta);
+    }
+
+    public override void ScaleDocument(double scaleX, double scaleY)
+    {
+        Bounds = ScaleDocumentBounds(Bounds, scaleX, scaleY);
     }
 
     public override void MoveHandle(string handle, Point point, bool constrainToSquare)
@@ -6044,6 +7378,20 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
         }
     }
 
+    public override void ScaleDocument(double scaleX, double scaleY)
+    {
+        if (Mode == HighlightMode.Region)
+        {
+            Bounds = ScaleDocumentBounds(Bounds, scaleX, scaleY);
+            return;
+        }
+
+        for (var i = 0; i < Points.Count; i++)
+        {
+            Points[i] = ScaleDocumentPoint(Points[i], scaleX, scaleY);
+        }
+    }
+
     public override void MoveHandle(string handle, Point point, bool constrainToSquare)
     {
         switch (Mode)
@@ -6587,6 +7935,18 @@ internal sealed class ArrowAnnotation : AnnotationBase, IBorderShadowAnnotation
         {
             BendPoints[i] = BendPoints[i] + delta;
         }
+    }
+
+    public override void ScaleDocument(double scaleX, double scaleY)
+    {
+        Start = ScaleDocumentPoint(Start, scaleX, scaleY);
+        End = ScaleDocumentPoint(End, scaleX, scaleY);
+        for (var i = 0; i < BendPoints.Count; i++)
+        {
+            BendPoints[i] = ScaleDocumentPoint(BendPoints[i], scaleX, scaleY);
+        }
+
+        ScaleGeometricPoints(Math.Sqrt(Math.Max(0.0001, scaleX * scaleY)));
     }
 
     public override void MoveHandle(string handle, Point point, bool constrainToSquare)

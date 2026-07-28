@@ -3,6 +3,7 @@ using DegrandeScreenShot.App;
 using DegrandeScreenShot.App.Services;
 using System.Collections.Generic;
 using System.IO;
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -178,6 +179,278 @@ public class CapturedImageTests
 
         Assert.Equal(new byte[] { 0, 0, 255, 255 }, renderedPixel);
         Assert.Same(baseImage, withoutCursor);
+    }
+}
+
+public class ImageAnnotationTests
+{
+    [Fact]
+    public void CornerResizePreservesTheImportedImageAspectRatio()
+    {
+        var image = CreateImage(width: 400, height: 200);
+        var annotation = new ImageAnnotation(
+            image,
+            new Rect(10, 20, 200, 100),
+            "test image");
+
+        annotation.MoveHandle("BottomRight", new Point(310, 100), constrainToSquare: false);
+
+        Assert.Equal(300, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(150, annotation.Bounds.Height, precision: 3);
+        Assert.Equal(2, annotation.Bounds.Width / annotation.Bounds.Height, precision: 3);
+    }
+
+    [Fact]
+    public void CloneAndResetRetainTheImportedImageAndDefaultSize()
+    {
+        var image = CreateImage(width: 400, height: 200);
+        var annotation = new ImageAnnotation(
+            image,
+            new Rect(10, 20, 200, 100),
+            "test image");
+        annotation.MoveHandle("BottomRight", new Point(310, 170), constrainToSquare: false);
+
+        var clone = Assert.IsType<ImageAnnotation>(annotation.Clone());
+        clone.ResetScale();
+
+        Assert.Same(image, clone.Image);
+        Assert.Equal(annotation.ImportId, clone.ImportId);
+        Assert.Equal(200, clone.Bounds.Width, precision: 3);
+        Assert.Equal(100, clone.Bounds.Height, precision: 3);
+    }
+
+    [Fact]
+    public void ResizeScalePreservesAspectRatioAndUpdatesDimensions()
+    {
+        var annotation = new ImageAnnotation(
+            CreateImage(width: 400, height: 200),
+            new Rect(10, 20, 200, 100),
+            "test image");
+
+        annotation.SetScale(1.5);
+
+        Assert.Equal(1.5, annotation.Scale, precision: 3);
+        Assert.Equal(300, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(150, annotation.Bounds.Height, precision: 3);
+        Assert.Equal(2, annotation.Bounds.Width / annotation.Bounds.Height, precision: 3);
+    }
+
+    [Fact]
+    public void LockedDimensionEntryUpdatesTheOtherDimension()
+    {
+        var annotation = new ImageAnnotation(
+            CreateImage(width: 400, height: 200),
+            new Rect(10, 20, 200, 100),
+            "test image");
+
+        annotation.SetWidth(320);
+
+        Assert.True(annotation.IsAspectRatioLocked);
+        Assert.Equal(320, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(160, annotation.Bounds.Height, precision: 3);
+
+        annotation.SetHeight(90);
+
+        Assert.Equal(180, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(90, annotation.Bounds.Height, precision: 3);
+    }
+
+    [Fact]
+    public void UnlockedDimensionEntryAllowsIndependentWidthAndHeight()
+    {
+        var annotation = new ImageAnnotation(
+            CreateImage(width: 400, height: 200),
+            new Rect(10, 20, 200, 100),
+            "test image");
+
+        annotation.SetAspectRatioLocked(false);
+        annotation.SetWidth(300);
+        annotation.SetHeight(240);
+
+        Assert.False(annotation.IsAspectRatioLocked);
+        Assert.Equal(300, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(240, annotation.Bounds.Height, precision: 3);
+
+        var clone = Assert.IsType<ImageAnnotation>(annotation.Clone());
+        clone.SetHeight(180);
+        Assert.False(clone.IsAspectRatioLocked);
+        Assert.Equal(300, clone.Bounds.Width, precision: 3);
+        Assert.Equal(180, clone.Bounds.Height, precision: 3);
+
+        annotation.SetAspectRatioLocked(true);
+        annotation.SetWidth(450);
+
+        Assert.True(annotation.IsAspectRatioLocked);
+        Assert.Equal(450, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(360, annotation.Bounds.Height, precision: 3);
+    }
+
+    [Fact]
+    public void UnlockedCornerResizeCanChangeAspectRatio()
+    {
+        var annotation = new ImageAnnotation(
+            CreateImage(width: 400, height: 200),
+            new Rect(10, 20, 200, 100),
+            "test image");
+        annotation.SetAspectRatioLocked(false);
+
+        annotation.MoveHandle("BottomRight", new Point(310, 260), constrainToSquare: false);
+
+        Assert.Equal(300, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(240, annotation.Bounds.Height, precision: 3);
+        Assert.Equal(1.25, annotation.Bounds.Width / annotation.Bounds.Height, precision: 3);
+    }
+
+    [Fact]
+    public void DocumentResizeScalesImportedImageGeometryAndLockedRatio()
+    {
+        var annotation = new ImageAnnotation(
+            CreateImage(width: 400, height: 200),
+            new Rect(10, 20, 200, 100),
+            "test image");
+
+        annotation.ScaleDocument(scaleX: 0.5, scaleY: 2);
+
+        Assert.Equal(5, annotation.Bounds.X, precision: 3);
+        Assert.Equal(40, annotation.Bounds.Y, precision: 3);
+        Assert.Equal(100, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(200, annotation.Bounds.Height, precision: 3);
+
+        annotation.SetWidth(150);
+
+        Assert.Equal(150, annotation.Bounds.Width, precision: 3);
+        Assert.Equal(300, annotation.Bounds.Height, precision: 3);
+    }
+
+    [Fact]
+    public void BitmapResizeCreatesExactFrozenPixelDimensions()
+    {
+        var resized = EditorWindow.ResizeBitmapSource(
+            CreateImage(width: 400, height: 200),
+            targetWidth: 160,
+            targetHeight: 90);
+
+        Assert.Equal(160, resized.PixelWidth);
+        Assert.Equal(90, resized.PixelHeight);
+        Assert.True(resized.IsFrozen);
+    }
+
+    private static BitmapSource CreateImage(int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        var image = BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            pixels,
+            width * 4);
+        image.Freeze();
+        return image;
+    }
+}
+
+public class AnnotationRoundnessTests
+{
+    [Fact]
+    public void FrameRoundnessIsClampedAndPreservedByClone()
+    {
+        var annotation = new RectangleAnnotation
+        {
+            Bounds = new Rect(10, 20, 200, 100),
+        };
+
+        annotation.SetCornerRadius(140);
+        var clone = Assert.IsType<RectangleAnnotation>(annotation.Clone());
+
+        Assert.Equal(100, annotation.CornerRadius);
+        Assert.Equal(annotation.CornerRadius, clone.CornerRadius);
+    }
+
+    [Fact]
+    public void TextBoxRoundnessIsClampedAndPreservedByClone()
+    {
+        var annotation = new TextAnnotation
+        {
+            Location = new Point(10, 20),
+            Text = "Rounded text",
+        };
+
+        annotation.SetCornerRadius(-12);
+        Assert.Equal(0, annotation.CornerRadius);
+
+        annotation.SetCornerRadius(36);
+        var clone = Assert.IsType<TextAnnotation>(annotation.Clone());
+
+        Assert.Equal(36, clone.CornerRadius);
+    }
+
+    [Fact]
+    public void RoundnessDefaultsPreserveTheExistingFrameAndTextAppearance()
+    {
+        Assert.Equal(EditorWindow.DefaultFrameCornerRadius, new RectangleAnnotation().CornerRadius);
+        Assert.Equal(EditorWindow.DefaultTextCornerRadius, new TextAnnotation().CornerRadius);
+        Assert.Equal(EditorWindow.DefaultFrameCornerRadius, EditorPreferences.Default.FrameCornerRadius);
+        Assert.Equal(EditorWindow.DefaultTextCornerRadius, EditorPreferences.Default.TextCornerRadius);
+    }
+}
+
+public class ImageDropDataTests
+{
+    [Fact]
+    public void BrowserDropPrefersTheImageSourceOverTheContainingPage()
+    {
+        var data = new DataObject();
+        data.SetData(DataFormats.UnicodeText, "https://photos.example.test/photo/123");
+        data.SetData(
+            DataFormats.Html,
+            """
+            <html><body>
+            <a href="https://photos.example.test/photo/123">
+                <img src="https://images.example.test/photo.jpg?width=1200&amp;height=800">
+            </a>
+            </body></html>
+            """);
+
+        var imageUrls = EditorWindow.GetDroppedImageUrls(data);
+
+        Assert.Equal(
+            [
+                "https://images.example.test/photo.jpg?width=1200&height=800",
+                "https://photos.example.test/photo/123",
+            ],
+            imageUrls);
+    }
+
+    [Fact]
+    public void BrowserVirtualFileContentsAreDecodedBeforeAPrivateImageUrlIsNeeded()
+    {
+        var pixels = new byte[2 * 2 * 4];
+        var source = BitmapSource.Create(
+            2,
+            2,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            pixels,
+            2 * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(source));
+        using var encodedImage = new MemoryStream();
+        encoder.Save(encodedImage);
+        encodedImage.Position = 0;
+
+        var data = new DataObject();
+        data.SetData("FileContents", new MemoryStream(encodedImage.ToArray(), writable: false), autoConvert: false);
+
+        var wasDecoded = ImageImportService.TryLoadDroppedImageData(data, out var image);
+
+        Assert.True(wasDecoded);
+        Assert.Equal(2, image.PixelWidth);
+        Assert.Equal(2, image.PixelHeight);
     }
 }
 

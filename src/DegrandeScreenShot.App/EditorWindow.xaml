@@ -9,6 +9,9 @@
         Background="{DynamicResource ShellBackgroundBrush}"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
+        AllowDrop="True"
+        PreviewDragOver="EditorWindow_PreviewDragOver"
+        PreviewDrop="EditorWindow_PreviewDrop"
         PreviewKeyDown="EditorWindow_PreviewKeyDown"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
@@ -770,6 +773,228 @@
                                     </Canvas>
                                 </Viewbox>
                             </Button>
+                            <Border Width="1" Height="26" Margin="12,9,12,9" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
+                            <Button Click="AddImageFromFile_Click" Style="{StaticResource EditorTopBarButtonStyle}" ToolTip="Add image from file">
+                                <TextBlock Style="{StaticResource EditorGlyphStyle}" FontSize="18" Margin="0" Text="&#xE8B9;" />
+                            </Button>
+                            <Grid Margin="8,0,0,0">
+                                <Button x:Name="AddImageFromUrlButton"
+                                        Click="AddImageFromUrlButton_Click"
+                                        Style="{StaticResource EditorTopBarButtonStyle}"
+                                        ToolTip="Add image from URL">
+                                    <TextBlock Style="{StaticResource EditorGlyphStyle}" FontSize="18" Margin="0" Text="&#xE71B;" />
+                                </Button>
+                                <Popup x:Name="ImageUrlPopup"
+                                       AllowsTransparency="True"
+                                       Placement="Bottom"
+                                       PlacementTarget="{Binding ElementName=AddImageFromUrlButton}"
+                                       StaysOpen="False"
+                                       VerticalOffset="8">
+                                    <Border Width="380"
+                                            Padding="16"
+                                            Background="{DynamicResource PopupPanelBackgroundBrush}"
+                                            BorderBrush="{DynamicResource PopupPanelBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="14">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="28" ShadowDepth="8" Color="#CC000000" Opacity="0.46" />
+                                        </Border.Effect>
+                                        <StackPanel>
+                                            <TextBlock Text="Add image from URL"
+                                                       Foreground="{DynamicResource IslandTextBrush}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Margin="0,4,0,10"
+                                                       Text="Paste a direct http or https image link."
+                                                       Foreground="{DynamicResource IslandMutedTextBrush}"
+                                                       FontSize="12" />
+                                            <TextBox x:Name="ImageUrlTextBox"
+                                                     Padding="10,8"
+                                                     Background="{DynamicResource InlineTextInputBackgroundBrush}"
+                                                     BorderBrush="{DynamicResource InlineTextInputBorderBrush}"
+                                                     BorderThickness="1"
+                                                     Foreground="{DynamicResource InlineTextInputForegroundBrush}"
+                                                     PreviewKeyDown="ImageUrlTextBox_PreviewKeyDown" />
+                                            <TextBlock x:Name="ImageUrlStatusText"
+                                                       Margin="0,8,0,0"
+                                                       Foreground="{DynamicResource IslandMutedTextBrush}"
+                                                       FontSize="12"
+                                                       TextWrapping="Wrap"
+                                                       Visibility="Collapsed" />
+                                            <StackPanel Margin="0,12,0,0"
+                                                        Orientation="Horizontal"
+                                                        HorizontalAlignment="Right">
+                                                <Button Click="CancelImageUrl_Click"
+                                                        Style="{StaticResource EditorSecondaryButtonStyle}"
+                                                        Content="Cancel" />
+                                                <Button x:Name="ConfirmImageUrlButton"
+                                                        Margin="8,0,0,0"
+                                                        Click="ConfirmImageUrl_Click"
+                                                        Style="{StaticResource EditorPrimaryButtonStyle}"
+                                                        Content="Add image" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                            <Button Margin="8,0,0,0"
+                                    Click="ShowGallery_Click"
+                                    Style="{StaticResource EditorTopBarButtonStyle}"
+                                    ToolTip="Show image gallery">
+                                <TextBlock Style="{StaticResource EditorGlyphStyle}" FontSize="18" Margin="0" Text="&#xE91B;" />
+                            </Button>
+                            <Grid Margin="8,0,0,0">
+                                <Button x:Name="ResizeImageButton"
+                                        Width="96"
+                                        Click="ResizeImageButton_Click"
+                                        Style="{StaticResource EditorTopBarButtonStyle}"
+                                        ToolTip="Resize screenshot or selected image">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <Viewbox Width="17" Height="17">
+                                            <Canvas Width="18" Height="18">
+                                                <Path Stroke="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"
+                                                      StrokeThickness="1.6"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      Data="M2.5,7 V2.5 H7 M2.8,2.8 L8,8 M11,15.5 H15.5 V11 M10,10 L15.2,15.2" />
+                                            </Canvas>
+                                        </Viewbox>
+                                        <TextBlock Margin="7,0,0,0"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center"
+                                                   Text="Resize" />
+                                    </StackPanel>
+                                </Button>
+                                <Popup x:Name="ImageResizePopup"
+                                       AllowsTransparency="True"
+                                       Placement="Bottom"
+                                       PlacementTarget="{Binding ElementName=ResizeImageButton}"
+                                       StaysOpen="False"
+                                       VerticalOffset="8">
+                                    <Border Width="440"
+                                            Padding="16"
+                                            Background="{DynamicResource PopupPanelBackgroundBrush}"
+                                            BorderBrush="{DynamicResource PopupPanelBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="14">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="28" ShadowDepth="8" Color="#CC000000" Opacity="0.46" />
+                                        </Border.Effect>
+                                        <StackPanel>
+                                            <TextBlock Text="Resize image"
+                                                       Foreground="{DynamicResource IslandTextBrush}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Margin="0,4,0,12"
+                                                       Text="Use the slider, enter pixel dimensions, or drag an orange handle."
+                                                       Foreground="{DynamicResource IslandMutedTextBrush}"
+                                                       FontSize="12" />
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Slider x:Name="ImageResizeSlider"
+                                                        Width="230"
+                                                        Minimum="0.1"
+                                                        Maximum="3.0"
+                                                        SmallChange="0.05"
+                                                        LargeChange="0.2"
+                                                        TickFrequency="0.05"
+                                                        IsSnapToTickEnabled="False"
+                                                        VerticalAlignment="Center"
+                                                        ValueChanged="ImageResizeSlider_ValueChanged"
+                                                        ToolTip="Image size" />
+                                                <TextBlock x:Name="ImageResizeValueLabel"
+                                                           Width="160"
+                                                           Margin="10,0,0,0"
+                                                           Foreground="{DynamicResource IslandMutedTextBrush}"
+                                                           FontSize="12"
+                                                           VerticalAlignment="Center"
+                                                           Text="100% · 0 × 0 px" />
+                                            </StackPanel>
+                                            <Grid Margin="0,14,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock Margin="0,0,0,5"
+                                                               Text="Width (px)"
+                                                               Foreground="{DynamicResource IslandMutedTextBrush}"
+                                                               FontSize="11" />
+                                                    <TextBox x:Name="ImageWidthTextBox"
+                                                             Height="36"
+                                                             Padding="10,6"
+                                                             HorizontalContentAlignment="Right"
+                                                             VerticalContentAlignment="Center"
+                                                             Background="{DynamicResource InlineTextInputBackgroundBrush}"
+                                                             BorderBrush="{DynamicResource InlineTextInputBorderBrush}"
+                                                             BorderThickness="1"
+                                                             Foreground="{DynamicResource InlineTextInputForegroundBrush}"
+                                                             LostKeyboardFocus="ImageDimensionTextBox_LostKeyboardFocus"
+                                                             PreviewKeyDown="ImageDimensionTextBox_PreviewKeyDown"
+                                                             ToolTip="Image width in pixels" />
+                                                </StackPanel>
+                                                <ToggleButton x:Name="ImageAspectRatioLockButton"
+                                                              Grid.Column="1"
+                                                              Width="132"
+                                                              Height="36"
+                                                              Margin="12,20,12,0"
+                                                              IsChecked="True"
+                                                              Checked="ImageAspectRatioLockButton_Changed"
+                                                              Unchecked="ImageAspectRatioLockButton_Changed"
+                                                              Style="{StaticResource EditorTopBarToolButtonStyle}"
+                                                              ToolTip="Aspect ratio locked"
+                                                              AutomationProperties.Name="Toggle aspect ratio lock">
+                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                        <TextBlock x:Name="ImageAspectRatioLockGlyph"
+                                                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                   FontSize="14"
+                                                                   VerticalAlignment="Center"
+                                                                   Text="&#xE72E;" />
+                                                        <TextBlock x:Name="ImageAspectRatioLockLabel"
+                                                                   Margin="7,0,0,0"
+                                                                   FontSize="11"
+                                                                   FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"
+                                                                   Text="Ratio locked" />
+                                                    </StackPanel>
+                                                </ToggleButton>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Margin="0,0,0,5"
+                                                               Text="Height (px)"
+                                                               Foreground="{DynamicResource IslandMutedTextBrush}"
+                                                               FontSize="11" />
+                                                    <TextBox x:Name="ImageHeightTextBox"
+                                                             Height="36"
+                                                             Padding="10,6"
+                                                             HorizontalContentAlignment="Right"
+                                                             VerticalContentAlignment="Center"
+                                                             Background="{DynamicResource InlineTextInputBackgroundBrush}"
+                                                             BorderBrush="{DynamicResource InlineTextInputBorderBrush}"
+                                                             BorderThickness="1"
+                                                             Foreground="{DynamicResource InlineTextInputForegroundBrush}"
+                                                             LostKeyboardFocus="ImageDimensionTextBox_LostKeyboardFocus"
+                                                             PreviewKeyDown="ImageDimensionTextBox_PreviewKeyDown"
+                                                             ToolTip="Image height in pixels" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <TextBlock x:Name="ImageResizeValidationText"
+                                                       Margin="0,7,0,0"
+                                                       Foreground="#FFE36B63"
+                                                       FontSize="11"
+                                                       Text="Enter a value between 18 and 10,000 px."
+                                                       Visibility="Collapsed" />
+                                            <Button Margin="0,12,0,0"
+                                                    Width="108"
+                                                    HorizontalAlignment="Right"
+                                                    Click="ResetImageSize_Click"
+                                                    Style="{StaticResource EditorSecondaryButtonStyle}"
+                                                    Content="Reset size" />
+                                        </StackPanel>
+                                    </Border>
+                                </Popup>
+                            </Grid>
                             <ToggleButton x:Name="CursorVisibilityButton"
                                           Margin="8,0,0,0"
                                           Style="{StaticResource EditorTopBarToolButtonStyle}"
@@ -881,6 +1106,10 @@
                         </Border.RenderTransform>
                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
+                            <Border x:Name="ColorActionPanel"
+                                    Padding="3,2"
+                                    Background="White"
+                                    CornerRadius="5">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <Button Width="26" Height="26" Margin="0,0,6,0" Padding="0" BorderThickness="0" Background="Transparent" Click="ColorOption_Click" Tag="#0A7A68">
                                     <Border Width="20" Height="20" Background="#0A7A68" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
@@ -910,6 +1139,7 @@
                                     <Border Width="20" Height="20" Background="#111827" BorderBrush="#8A96A3" BorderThickness="1" CornerRadius="3" />
                                 </Button>
                             </StackPanel>
+                            </Border>
                             <StackPanel x:Name="ResetActionPanel" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
                                 <Button Width="34"
                                         Height="28"
@@ -1116,6 +1346,54 @@
                                            VerticalAlignment="Center"
                                            Text="15%" />
                                     </StackPanel>
+
+                            <StackPanel x:Name="ShapeBackgroundOpacityPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Opacity" VerticalAlignment="Center" />
+                                <Slider x:Name="ShapeBackgroundOpacitySlider"
+                                        Width="140"
+                                        Margin="8,0,0,0"
+                                        Minimum="0"
+                                        Maximum="100"
+                                        Value="0"
+                                        TickFrequency="5"
+                                        IsSnapToTickEnabled="False"
+                                        SmallChange="1"
+                                        LargeChange="10"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="ShapeBackgroundOpacitySlider_ValueChanged"
+                                        ToolTip="Frame or circle background opacity" />
+                                <TextBlock x:Name="ShapeBackgroundOpacityValueText"
+                                           Width="42"
+                                           Margin="8,0,0,0"
+                                           Foreground="{DynamicResource IslandMutedTextBrush}"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Text="0%" />
+                            </StackPanel>
+
+                            <StackPanel x:Name="CornerRoundnessPanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
+                                <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />
+                                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource IslandTextBrush}" Text="Roundness" VerticalAlignment="Center" />
+                                <Slider x:Name="CornerRoundnessSlider"
+                                        Width="120"
+                                        Margin="8,0,0,0"
+                                        Minimum="0"
+                                        Maximum="100"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        SmallChange="1"
+                                        LargeChange="10"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="CornerRoundnessSlider_ValueChanged"
+                                        ToolTip="Frame or text box corner roundness" />
+                                <TextBlock x:Name="CornerRoundnessValueLabel"
+                                           Width="46"
+                                           Margin="8,0,0,0"
+                                           Foreground="{DynamicResource IslandMutedTextBrush}"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Text="0 px" />
+                            </StackPanel>
 
                             <StackPanel x:Name="ObjectStylePanel" Orientation="Horizontal" Margin="10,0,0,0" Visibility="Collapsed" VerticalAlignment="Center">
                                 <Border Width="1" Height="24" Margin="0,0,10,0" Background="{DynamicResource IslandDividerBrush}" CornerRadius="1" />

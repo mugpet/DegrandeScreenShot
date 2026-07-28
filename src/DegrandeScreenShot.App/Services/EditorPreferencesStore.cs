@@ -72,6 +72,8 @@ internal sealed class EditorPreferencesStore
 internal sealed record EditorPreferences(
     string ThemePreference,
     string ShapeColor,
+    double? ShapeBackgroundOpacity,
+    double? FrameCornerRadius,
     string ArrowColor,
     string ArrowStyle,
     List<ArrowShapePresetPreference>? ArrowShapePresets,
@@ -96,6 +98,7 @@ internal sealed record EditorPreferences(
     double TextFontSize,
     double TextBackgroundOpacity,
     double TextBackgroundStrength,
+    double? TextCornerRadius,
     double? HighlightStrength,
     string ObscureColor,
     string ObscureMode,
@@ -106,6 +109,8 @@ internal sealed record EditorPreferences(
     internal static EditorPreferences Default => new(
         ThemePreference: "System",
         ShapeColor: "#FF125B50",
+        ShapeBackgroundOpacity: EditorWindow.DefaultShapeBackgroundOpacity,
+        FrameCornerRadius: EditorWindow.DefaultFrameCornerRadius,
         ArrowColor: "#FFEC4899",
         ArrowStyle: "BrushStroke",
         ArrowShapePresets: [],
@@ -130,6 +135,7 @@ internal sealed record EditorPreferences(
         TextFontSize: 26,
         TextBackgroundOpacity: 0.80,
         TextBackgroundStrength: 0.30,
+        TextCornerRadius: EditorWindow.DefaultTextCornerRadius,
         HighlightStrength: 0.55,
         ObscureColor: "#FFD94841",
         ObscureMode: "Blur",

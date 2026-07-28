@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -24,6 +25,8 @@ public partial class GalleryWindow : Window
     private readonly EditorPreferencesStore _preferencesStore = new();
     private readonly FileSystemWatcher _watcher;
     private readonly DispatcherTimer _refreshTimer;
+    private Point? _screenshotDragStart;
+    private GalleryScreenshotViewModel? _screenshotDragCandidate;
 
     public GalleryWindow(ScreenshotLibraryService screenshotLibrary)
     {
@@ -170,7 +173,7 @@ public partial class GalleryWindow : Window
         DayGroupsItemsControl.ItemsSource = groups;
         var isEmpty = groups.Length == 0;
         EmptyState.Visibility = isEmpty ? Visibility.Visible : Visibility.Collapsed;
-        GalleryScroll.Visibility = isEmpty ? Visibility.Collapsed : Visibility.Visible;
+        DayGroupsItemsControl.Visibility = isEmpty ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private static GalleryScreenshotViewModel? CreateViewModel(ScreenshotLibraryItem item)
@@ -236,6 +239,43 @@ public partial class GalleryWindow : Window
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+    }
+
+    private void Screenshot_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.StylusDevice is not null)
+        {
+            _screenshotDragStart = null;
+            _screenshotDragCandidate = null;
+            return;
+        }
+
+        _screenshotDragStart = e.GetPosition(this);
+        _screenshotDragCandidate = (sender as FrameworkElement)?.Tag as GalleryScreenshotViewModel;
+    }
+
+    private void Screenshot_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.StylusDevice is not null
+            || e.LeftButton != MouseButtonState.Pressed
+            || _screenshotDragStart is not { } dragStart
+            || _screenshotDragCandidate is not { } screenshot)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - dragStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(current.Y - dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        _screenshotDragStart = null;
+        _screenshotDragCandidate = null;
+        var dragData = new DataObject(DataFormats.FileDrop, new[] { screenshot.Path });
+        _ = DragDrop.DoDragDrop((DependencyObject)sender, dragData, DragDropEffects.Copy);
+        e.Handled = true;
     }
 
     private void OpenFolder_Click(object sender, RoutedEventArgs e)

@@ -84,6 +84,22 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="GalleryDayGroupItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <ContentPresenter />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -123,13 +139,17 @@
             </Grid>
         </Border>
 
-        <ScrollViewer x:Name="GalleryScroll"
-                      Grid.Row="1"
-                      Padding="28,24,12,28"
-                      HorizontalScrollBarVisibility="Disabled"
-                      VerticalScrollBarVisibility="Auto">
-            <ItemsControl x:Name="DayGroupsItemsControl">
-                <ItemsControl.ItemTemplate>
+        <ListBox x:Name="DayGroupsItemsControl"
+                 Grid.Row="1"
+                 Padding="28,24,12,28"
+                 Background="Transparent"
+                 BorderThickness="0"
+                 ItemContainerStyle="{StaticResource GalleryDayGroupItemStyle}"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 ScrollViewer.CanContentScroll="False"
+                 ScrollViewer.PanningMode="VerticalOnly">
+                <ListBox.ItemTemplate>
                     <DataTemplate>
                         <StackPanel Margin="0,0,0,16">
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
@@ -160,8 +180,10 @@
                                                 Height="210"
                                                 Style="{StaticResource ThumbnailButtonStyle}"
                                                 Tag="{Binding}"
+                                                PreviewMouseLeftButtonDown="Screenshot_PreviewMouseLeftButtonDown"
+                                                PreviewMouseMove="Screenshot_PreviewMouseMove"
                                                 Click="Screenshot_Click"
-                                                ToolTip="Open in a new editor window">
+                                                ToolTip="Open in a new editor window, or drag into an editor">
                                             <Grid>
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="156" />
@@ -203,9 +225,8 @@
                             </ItemsControl>
                         </StackPanel>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+                </ListBox.ItemTemplate>
+        </ListBox>
 
         <StackPanel x:Name="EmptyState"
                     Grid.Row="1"
