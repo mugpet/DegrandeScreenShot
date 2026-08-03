@@ -188,6 +188,8 @@ public partial class EditorWindow : Window
         _baseImageLockedAspectRatio = GetAspectRatio(baseImage.PixelWidth, baseImage.PixelHeight);
         _sourcePath = sourcePath;
         _capturedCursor = capturedCursor;
+        ImageAspectRatioLockButton.Checked += ImageAspectRatioLockButton_Changed;
+        ImageAspectRatioLockButton.Unchecked += ImageAspectRatioLockButton_Changed;
         CursorVisibilityButton.IsEnabled = capturedCursor is not null;
         CursorVisibilityButton.IsChecked = capturedCursor is not null;
         _isCapturedCursorVisible = capturedCursor is not null;
@@ -200,6 +202,7 @@ public partial class EditorWindow : Window
         SystemEvents.UserPreferenceChanged += SystemEvents_UserPreferenceChanged;
         Title = $"Edit Capture {_nextEditorNumber++}";
         ApplyWorkingImage(_workingImage);
+        UpdateImageResizeControls(null);
         InitializeHistory();
         ApplyTheme();
         SelectToolButton.IsChecked = true;

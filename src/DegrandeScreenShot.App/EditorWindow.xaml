@@ -941,8 +941,6 @@
                                                               Height="36"
                                                               Margin="12,20,12,0"
                                                               IsChecked="True"
-                                                              Checked="ImageAspectRatioLockButton_Changed"
-                                                              Unchecked="ImageAspectRatioLockButton_Changed"
                                                               Style="{StaticResource EditorTopBarToolButtonStyle}"
                                                               ToolTip="Aspect ratio locked"
                                                               AutomationProperties.Name="Toggle aspect ratio lock">

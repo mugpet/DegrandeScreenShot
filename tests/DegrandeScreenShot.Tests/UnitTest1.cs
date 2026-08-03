@@ -182,6 +182,46 @@ public class CapturedImageTests
     }
 }
 
+public class EditorWindowInitializationTests
+{
+    [Fact]
+    public void ConstructsWithDefaultResizeControls()
+    {
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? initializationException = null;
+        var thread = new Thread(() =>
+        {
+            EditorWindow? window = null;
+            try
+            {
+                var pixels = Enumerable.Repeat((byte)255, 4 * 4 * 4).ToArray();
+                var image = BitmapSource.Create(4, 4, 96, 96, PixelFormats.Bgra32, null, pixels, stride: 16);
+                image.Freeze();
+
+                window = new EditorWindow(image);
+                Assert.True(window.ImageAspectRatioLockButton.IsChecked);
+                Assert.Equal("Ratio locked", window.ImageAspectRatioLockLabel.Text);
+                Assert.Equal("4", window.ImageWidthTextBox.Text);
+                Assert.Equal("4", window.ImageHeightTextBox.Text);
+            }
+            catch (Exception exception)
+            {
+                initializationException = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception);
+            }
+            finally
+            {
+                window?.Close();
+            }
+        });
+
+        thread.IsBackground = true;
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)), "Editor initialization timed out.");
+        initializationException?.Throw();
+    }
+}
+
 public class ImageAnnotationTests
 {
     [Fact]
