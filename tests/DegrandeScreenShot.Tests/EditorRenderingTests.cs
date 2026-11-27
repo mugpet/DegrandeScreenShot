@@ -8,6 +8,7 @@ using DegrandeScreenShot.App;
 
 namespace DegrandeScreenShot.Tests;
 
+[Collection("Editor windows")]
 public class EditorRenderingTests
 {
     [Fact]
@@ -50,8 +51,8 @@ public class EditorRenderingTests
         var highlight = HighlightAnnotation.CreateRegion(new Point(48, 18));
         highlight.UpdateFromAnchor(new Point(48, 18), new Point(126, 90), false);
 
-        var edited = new EditorWindow(image);
-        var fresh = new EditorWindow(image);
+        var edited = new EditorWindow(new InMemoryEditorPreferences(), image);
+        var fresh = new EditorWindow(new InMemoryEditorPreferences(), image);
         try
         {
             AddLayers(edited, frame, highlight);
