@@ -1,8 +1,10 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -23,8 +25,23 @@ public partial class GalleryWindow : Window
     private const uint DwmColorDefault = 0xFFFFFFFF;
     private readonly ScreenshotLibraryService _screenshotLibrary;
     private readonly EditorPreferencesStore _preferencesStore = new();
-    private readonly FileSystemWatcher _watcher;
+    private FileSystemWatcher? _watcher;
     private readonly DispatcherTimer _refreshTimer;
+    private readonly SemaphoreSlim _thumbnailWorkers = new(2);
+    private readonly Dictionary<Image, CancellationTokenSource> _thumbnailRequests = [];
+    private readonly HashSet<Image> _unavailableThumbnails = [];
+    private readonly Dictionary<ScreenshotLibraryItem, BitmapSource> _thumbnailCache = [];
+    private readonly Queue<ScreenshotLibraryItem> _thumbnailOrder = [];
+    private readonly HashSet<string> _openingPaths = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<ScreenshotLibraryItem>? _screenshots;
+    private GalleryThemePreference? _themeMode;
+    private DateTime _groupDate;
+    private int _columns = 1;
+    private bool _refreshRunning;
+    private bool _refreshPending;
+    private int _refreshPosted;
+    private bool _closed;
+    private string _libraryMessage = "Loading screenshots…";
     private Point? _screenshotDragStart;
     private GalleryScreenshotViewModel? _screenshotDragCandidate;
 
@@ -34,7 +51,6 @@ public partial class GalleryWindow : Window
         _screenshotLibrary = screenshotLibrary;
         ApplyTheme();
 
-        Directory.CreateDirectory(_screenshotLibrary.RootDirectory);
         LibraryPathText.Text = _screenshotLibrary.RootDirectory;
         LibraryPathText.ToolTip = _screenshotLibrary.RootDirectory;
 
@@ -43,16 +59,6 @@ public partial class GalleryWindow : Window
             Interval = TimeSpan.FromMilliseconds(300),
         };
         _refreshTimer.Tick += RefreshTimer_Tick;
-
-        _watcher = new FileSystemWatcher(_screenshotLibrary.RootDirectory, "*.png")
-        {
-            NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime | NotifyFilters.LastWrite | NotifyFilters.Size,
-            EnableRaisingEvents = true,
-        };
-        _watcher.Created += Library_Changed;
-        _watcher.Changed += Library_Changed;
-        _watcher.Deleted += Library_Changed;
-        _watcher.Renamed += Library_Changed;
 
         Loaded += GalleryWindow_Loaded;
         Activated += GalleryWindow_Activated;
@@ -69,8 +75,11 @@ public partial class GalleryWindow : Window
 
     private void GalleryWindow_Activated(object? sender, EventArgs e)
     {
-        ApplyTheme();
-        RefreshGallery();
+        if (IsLoaded && !_refreshRunning)
+        {
+            ApplyTheme();
+            RefreshGallery();
+        }
     }
 
     private void GalleryWindow_SourceInitialized(object? sender, EventArgs e)
@@ -90,7 +99,14 @@ public partial class GalleryWindow : Window
 
     private void ApplyTheme()
     {
-        var isDark = ResolveThemeMode() == GalleryThemePreference.Dark;
+        var mode = ResolveThemeMode();
+        if (_themeMode == mode)
+        {
+            return;
+        }
+
+        _themeMode = mode;
+        var isDark = mode == GalleryThemePreference.Dark;
         var palette = isDark ? GalleryPalette.Dark : GalleryPalette.Light;
 
         SetBrushColor("GalleryBackgroundBrush", palette.Background);
@@ -139,7 +155,7 @@ public partial class GalleryWindow : Window
             return;
         }
 
-        var isDark = ResolveThemeMode() == GalleryThemePreference.Dark;
+        var isDark = _themeMode == GalleryThemePreference.Dark;
         var palette = isDark ? GalleryPalette.Dark : GalleryPalette.Light;
         var useDarkMode = isDark ? 1 : 0;
         _ = DwmSetWindowAttribute(handle, DwmUseImmersiveDarkModeAttribute, ref useDarkMode, sizeof(int));
@@ -157,49 +173,226 @@ public partial class GalleryWindow : Window
         return (uint)(color.R | (color.G << 8) | (color.B << 16));
     }
 
-    private void RefreshGallery()
+    private FileSystemWatcher WatchLibrary()
     {
-        var today = DateTime.Today;
-        var groups = _screenshotLibrary
-            .GetScreenshots()
-            .GroupBy(item => item.CreatedAt.Date)
-            .OrderByDescending(group => group.Key)
-            .Select(group => new GalleryDayGroup(
-                FormatDayHeader(group.Key, today),
-                group.Select(CreateViewModel).Where(item => item is not null).Cast<GalleryScreenshotViewModel>().ToArray()))
-            .Where(group => group.Count > 0)
-            .ToArray();
-
-        DayGroupsItemsControl.ItemsSource = groups;
-        var isEmpty = groups.Length == 0;
-        EmptyState.Visibility = isEmpty ? Visibility.Visible : Visibility.Collapsed;
-        DayGroupsItemsControl.Visibility = isEmpty ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private static GalleryScreenshotViewModel? CreateViewModel(ScreenshotLibraryItem item)
-    {
+        Directory.CreateDirectory(_screenshotLibrary.RootDirectory);
+        var watcher = new FileSystemWatcher(_screenshotLibrary.RootDirectory, "*.png")
+        {
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime | NotifyFilters.LastWrite | NotifyFilters.Size,
+        };
+        watcher.Created += Library_Changed;
+        watcher.Changed += Library_Changed;
+        watcher.Deleted += Library_Changed;
+        watcher.Renamed += Library_Changed;
+        watcher.Error += Library_WatchError;
         try
         {
-            var thumbnail = ScreenshotLibraryService.LoadImage(item.Path, decodePixelWidth: 480);
-            return new GalleryScreenshotViewModel(
-                item.Path,
-                Path.GetFileNameWithoutExtension(item.FileName),
-                item.CreatedAt.ToString("t", CultureInfo.CurrentCulture),
-                thumbnail);
+            watcher.EnableRaisingEvents = true;
+            return watcher;
         }
-        catch (IOException)
+        catch
         {
-            return null;
-        }
-        catch (NotSupportedException)
-        {
-            return null;
-        }
-        catch (ArgumentException)
-        {
-            return null;
+            watcher.Dispose();
+            throw;
         }
     }
+
+    private async void RefreshGallery()
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        if (_refreshRunning)
+        {
+            _refreshPending = true;
+            return;
+        }
+
+        _refreshRunning = true;
+        try
+        {
+            if (_watcher is null)
+            {
+                var watcher = await Task.Run(WatchLibrary);
+                if (_closed)
+                {
+                    watcher.Dispose();
+                    return;
+                }
+
+                _watcher = watcher;
+            }
+
+            var items = await Task.Run(_screenshotLibrary.GetScreenshots);
+            if (!_closed && (_screenshots is null || !items.SequenceEqual(_screenshots) || _groupDate != DateTime.Today))
+            {
+                _screenshots = items;
+                RebuildRows();
+            }
+            else if (!_closed)
+            {
+                foreach (var image in _unavailableThumbnails.ToArray())
+                {
+                    LoadThumbnail(image);
+                }
+            }
+
+            _libraryMessage = string.Empty;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception or ArgumentException)
+        {
+            _libraryMessage = "Couldn't read the library. Click Refresh to retry.";
+        }
+        finally
+        {
+            _refreshRunning = false;
+            if (!_closed)
+            {
+                UpdateStatus();
+                if (_refreshPending)
+                {
+                    _refreshPending = false;
+                    ScheduleRefresh();
+                }
+            }
+        }
+    }
+
+    private void Gallery_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.ViewportWidthChange == 0 || e.ViewportWidth <= 0)
+        {
+            return;
+        }
+
+        // Each 240-DIP card has a 16-DIP trailing margin.
+        var columns = Math.Max(1, (int)(e.ViewportWidth / 256));
+        if (columns != _columns)
+        {
+            _columns = columns;
+            RebuildRows();
+        }
+    }
+
+    private void RebuildRows()
+    {
+        if (_screenshots is null)
+        {
+            return;
+        }
+
+        _groupDate = DateTime.Today;
+        var rows = new List<GalleryRow>();
+        foreach (var day in _screenshots.GroupBy(item => item.CreatedAt.Date))
+        {
+            string? header = FormatDayHeader(day.Key, _groupDate);
+            var count = day.Count();
+            foreach (var row in day.Select(item => new GalleryScreenshotViewModel(item)).Chunk(_columns))
+            {
+                rows.Add(new GalleryRow(header, count, row));
+                header = null;
+            }
+        }
+
+        GalleryRows.ItemsSource = rows;
+        EmptyState.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void Thumbnail_Loaded(object sender, RoutedEventArgs e) => LoadThumbnail((Image)sender);
+
+    private void Thumbnail_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        var image = (Image)sender;
+        if (image.IsLoaded)
+        {
+            LoadThumbnail(image);
+        }
+    }
+
+    private void Thumbnail_Unloaded(object sender, RoutedEventArgs e) => ResetThumbnail((Image)sender);
+
+    private void ResetThumbnail(Image image)
+    {
+        if (_thumbnailRequests.Remove(image, out var pending))
+        {
+            pending.Cancel();
+        }
+
+        _unavailableThumbnails.Remove(image);
+        image.Tag = null;
+        image.Source = null;
+    }
+
+    private async void LoadThumbnail(Image image)
+    {
+        ResetThumbnail(image);
+        if (_closed || image.DataContext is not GalleryScreenshotViewModel screenshot)
+        {
+            return;
+        }
+
+        var item = screenshot.Item;
+        if (_thumbnailCache.TryGetValue(item, out var cached))
+        {
+            image.Source = cached;
+            return;
+        }
+
+        using var request = new CancellationTokenSource();
+        _thumbnailRequests[image] = request;
+        try
+        {
+            await _thumbnailWorkers.WaitAsync(request.Token);
+            try
+            {
+                var thumbnail = await Task.Run(() => ScreenshotLibraryService.LoadGalleryThumbnail(item.Path), request.Token);
+                if (!request.IsCancellationRequested && !_closed)
+                {
+                    image.Source = thumbnail;
+                    if (_thumbnailCache.TryAdd(item, thumbnail))
+                    {
+                        _thumbnailOrder.Enqueue(item);
+                        if (_thumbnailOrder.Count > 64)
+                        {
+                            _thumbnailCache.Remove(_thumbnailOrder.Dequeue());
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                _thumbnailWorkers.Release();
+            }
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested)
+        {
+            // The row was recycled or the gallery was closed.
+        }
+        catch (Exception exception) when (IsImageReadError(exception))
+        {
+            // An external editor may still be writing the PNG. Keep the card usable.
+            if (!request.IsCancellationRequested && !_closed)
+            {
+                image.Tag = "Unavailable";
+                _unavailableThumbnails.Add(image);
+            }
+        }
+        finally
+        {
+            if (!request.IsCancellationRequested)
+            {
+                _thumbnailRequests.Remove(image);
+            }
+        }
+    }
+
+    private static bool IsImageReadError(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or FormatException or COMException;
+
+    private void UpdateStatus() =>
+        StatusText.Text = _openingPaths.Count > 0 ? "Opening screenshot…" : _libraryMessage;
 
     private static string FormatDayHeader(DateTime day, DateTime today)
     {
@@ -216,28 +409,43 @@ public partial class GalleryWindow : Window
         return day.ToString("dddd, d MMMM yyyy", CultureInfo.CurrentCulture);
     }
 
-    private void Screenshot_Click(object sender, RoutedEventArgs e)
+    private async void Screenshot_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: GalleryScreenshotViewModel screenshot })
+        if (sender is not FrameworkElement { Tag: GalleryScreenshotViewModel screenshot }
+            || !_openingPaths.Add(screenshot.Path))
         {
             return;
         }
 
+        UpdateStatus();
         try
         {
-            var image = ScreenshotLibraryService.LoadImage(screenshot.Path);
+            var image = await Task.Run(() => ScreenshotLibraryService.LoadImage(screenshot.Path));
+            if (_closed)
+            {
+                return;
+            }
+
             var editor = new EditorWindow(image, screenshot.Path);
             editor.Show();
             editor.Activate();
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        catch (Exception exception) when (IsImageReadError(exception))
         {
-            MessageBox.Show(
-                this,
-                $"The screenshot could not be opened.\n\n{exception.Message}",
-                "Open screenshot",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            if (!_closed)
+            {
+                MessageBox.Show(
+                    this,
+                    $"The screenshot could not be opened.\n\n{exception.Message}",
+                    "Open screenshot",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            _openingPaths.Remove(screenshot.Path);
+            UpdateStatus();
         }
     }
 
@@ -278,14 +486,27 @@ public partial class GalleryWindow : Window
         e.Handled = true;
     }
 
-    private void OpenFolder_Click(object sender, RoutedEventArgs e)
+    private async void OpenFolder_Click(object sender, RoutedEventArgs e)
     {
-        Directory.CreateDirectory(_screenshotLibrary.RootDirectory);
-        Process.Start(new ProcessStartInfo
+        try
         {
-            FileName = _screenshotLibrary.RootDirectory,
-            UseShellExecute = true,
-        });
+            await Task.Run(() =>
+            {
+                Directory.CreateDirectory(_screenshotLibrary.RootDirectory);
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = _screenshotLibrary.RootDirectory,
+                    UseShellExecute = true,
+                });
+            });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception)
+        {
+            if (!_closed)
+            {
+                MessageBox.Show(this, exception.Message, "Open screenshot folder", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
     }
 
     private void Refresh_Click(object sender, RoutedEventArgs e)
@@ -293,15 +514,39 @@ public partial class GalleryWindow : Window
         RefreshGallery();
     }
 
-    private void Library_Changed(object sender, FileSystemEventArgs e)
+    private void Library_Changed(object sender, EventArgs e)
     {
-        Dispatcher.BeginInvoke(new Action(ScheduleRefresh));
+        if (Interlocked.Exchange(ref _refreshPosted, 1) == 0)
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                Interlocked.Exchange(ref _refreshPosted, 0);
+                ScheduleRefresh();
+            }, DispatcherPriority.Background);
+        }
+    }
+
+    private void Library_WatchError(object sender, ErrorEventArgs e)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_watcher == sender)
+            {
+                _watcher.Dispose();
+                _watcher = null;
+            }
+
+            ScheduleRefresh();
+        }, DispatcherPriority.Background);
     }
 
     private void ScheduleRefresh()
     {
-        _refreshTimer.Stop();
-        _refreshTimer.Start();
+        if (!_closed)
+        {
+            _refreshTimer.Stop();
+            _refreshTimer.Start();
+        }
     }
 
     private void RefreshTimer_Tick(object? sender, EventArgs e)
@@ -312,15 +557,20 @@ public partial class GalleryWindow : Window
 
     private void GalleryWindow_Closed(object? sender, EventArgs e)
     {
+        _closed = true;
         _refreshTimer.Stop();
         _refreshTimer.Tick -= RefreshTimer_Tick;
 
-        _watcher.EnableRaisingEvents = false;
-        _watcher.Created -= Library_Changed;
-        _watcher.Changed -= Library_Changed;
-        _watcher.Deleted -= Library_Changed;
-        _watcher.Renamed -= Library_Changed;
-        _watcher.Dispose();
+        _watcher?.Dispose();
+        foreach (var request in _thumbnailRequests.Values.ToArray())
+        {
+            request.Cancel();
+        }
+
+        _thumbnailRequests.Clear();
+        _unavailableThumbnails.Clear();
+        _thumbnailCache.Clear();
+        _thumbnailOrder.Clear();
 
         Loaded -= GalleryWindow_Loaded;
         Activated -= GalleryWindow_Activated;
@@ -384,13 +634,14 @@ public partial class GalleryWindow : Window
     }
 }
 
-public sealed record GalleryDayGroup(string Header, IReadOnlyList<GalleryScreenshotViewModel> Screenshots)
+internal sealed record GalleryRow(string? Header, int Count, IReadOnlyList<GalleryScreenshotViewModel> Screenshots)
 {
-    public int Count => Screenshots.Count;
+    public Visibility HeaderVisibility => Header is null ? Visibility.Collapsed : Visibility.Visible;
 }
 
-public sealed record GalleryScreenshotViewModel(
-    string Path,
-    string DisplayName,
-    string TimeText,
-    BitmapSource Thumbnail);
+internal sealed record GalleryScreenshotViewModel(ScreenshotLibraryItem Item)
+{
+    public string Path => Item.Path;
+    public string DisplayName => System.IO.Path.GetFileNameWithoutExtension(Item.FileName);
+    public string TimeText => Item.CreatedAt.ToString("t", CultureInfo.CurrentCulture);
+}

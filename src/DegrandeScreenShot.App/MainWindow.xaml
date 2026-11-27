@@ -6,9 +6,9 @@
         mc:Ignorable="d"
         Title="Degrande ScreenShot"
         Width="620"
-        Height="695"
+        Height="677"
         MinWidth="620"
-        MinHeight="695"
+        MinHeight="677"
         WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         WindowStyle="None"
@@ -17,32 +17,15 @@
         ShowInTaskbar="True">
     
     <Window.Resources>
-        <!-- High-fidelity animations -->
-        <Storyboard x:Key="WindowEntranceStoryboard">
-            <DoubleAnimation Storyboard.TargetName="LauncherScale" 
-                             Storyboard.TargetProperty="ScaleX" 
-                             From="0.96" To="1.0" Duration="0:0:0.35">
+        <Storyboard x:Key="WindowEntranceStoryboard" FillBehavior="Stop">
+            <DoubleAnimation Storyboard.TargetName="LauncherTranslation"
+                             Storyboard.TargetProperty="Y" From="8" To="0" Duration="0:0:0.15">
                 <DoubleAnimation.EasingFunction>
-                    <CubicEase EasingMode="EaseOut"/>
+                    <CubicEase EasingMode="EaseOut" />
                 </DoubleAnimation.EasingFunction>
             </DoubleAnimation>
-            <DoubleAnimation Storyboard.TargetName="LauncherScale" 
-                             Storyboard.TargetProperty="ScaleY" 
-                             From="0.96" To="1.0" Duration="0:0:0.35">
-                <DoubleAnimation.EasingFunction>
-                    <CubicEase EasingMode="EaseOut"/>
-                </DoubleAnimation.EasingFunction>
-            </DoubleAnimation>
-            <DoubleAnimation Storyboard.TargetName="LauncherTranslation" 
-                             Storyboard.TargetProperty="Y" 
-                             From="30" To="0" Duration="0:0:0.4">
-                <DoubleAnimation.EasingFunction>
-                    <CircleEase EasingMode="EaseOut"/>
-                </DoubleAnimation.EasingFunction>
-            </DoubleAnimation>
-            <DoubleAnimation Storyboard.TargetName="MainWindowBorder" 
-                             Storyboard.TargetProperty="Opacity" 
-                             From="0.0" To="1.0" Duration="0:0:0.3"/>
+            <DoubleAnimation Storyboard.TargetName="MainWindowBorder"
+                             Storyboard.TargetProperty="Opacity" From="0.82" To="1" Duration="0:0:0.10" />
         </Storyboard>
 
         <!-- Dynamic iOS-style Toggle Switch template -->
@@ -103,38 +86,21 @@
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="16"
-                                RenderTransformOrigin="0.5,0.5"
                                 SnapsToDevicePixels="True">
-                            <Border.RenderTransform>
-                                <ScaleTransform x:Name="CardScale" ScaleX="1.0" ScaleY="1.0" />
-                            </Border.RenderTransform>
-                            <VisualStateManager.VisualStateGroups>
-                                <VisualStateGroup x:Name="CommonStates">
-                                    <VisualState x:Name="Normal" />
-                                    <VisualState x:Name="MouseOver">
-                                        <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX" To="1.02" Duration="0:0:0.15"/>
-                                            <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY" To="1.02" Duration="0:0:0.15"/>
-                                        </Storyboard>
-                                    </VisualState>
-                                    <VisualState x:Name="Pressed">
-                                        <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleX" To="0.98" Duration="0:0:0.08"/>
-                                            <DoubleAnimation Storyboard.TargetName="CardScale" Storyboard.TargetProperty="ScaleY" To="0.98" Duration="0:0:0.08"/>
-                                        </Storyboard>
-                                    </VisualState>
-                                </VisualStateGroup>
-                            </VisualStateManager.VisualStateGroups>
-                            
                             <ContentPresenter Content="{TemplateBinding Content}" Margin="{TemplateBinding Padding}" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                                 <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource LauncherSubtleCardBrush}"/>
-                                <Setter TargetName="CardBorder" Property="Effect">
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="CardBorder" Property="RenderTransform">
                                     <Setter.Value>
-                                        <DropShadowEffect BlurRadius="12" ShadowDepth="3" Color="#150C8EC5" Opacity="0.25"/>
+                                        <TranslateTransform Y="1" />
                                     </Setter.Value>
                                 </Setter>
                             </Trigger>
@@ -199,17 +165,14 @@
     
     <Grid Background="Transparent">
         <Border x:Name="MainWindowBorder" 
-                Opacity="0"
+                Opacity="1"
                 Margin="12"
                 CornerRadius="24"
                 Background="{DynamicResource LauncherBackgroundBrush}"
                 BorderBrush="{DynamicResource LauncherPanelBorderBrush}"
                 BorderThickness="1.5">
             <Border.RenderTransform>
-                <TransformGroup>
-                    <ScaleTransform x:Name="LauncherScale" CenterX="310" CenterY="348"/>
-                    <TranslateTransform x:Name="LauncherTranslation" Y="30"/>
-                </TransformGroup>
+                <TranslateTransform x:Name="LauncherTranslation" />
             </Border.RenderTransform>
             <Border.Effect>
                 <DropShadowEffect BlurRadius="28" ShadowDepth="6" Color="#2A000000" Opacity="0.3" />
@@ -238,7 +201,6 @@
                         </Grid.ColumnDefinitions>
                         
                         <StackPanel>
-                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LauncherHeroMutedBrush}" Text="SCREENSHOT SUITE" />
                             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                 <TextBlock FontSize="24" FontWeight="Bold" Foreground="{DynamicResource LauncherHeroTextBrush}" Text="Degrande" />
                                 <TextBlock FontSize="24" FontWeight="Light" Foreground="{DynamicResource LauncherHeroTextBrush}" Text="ScreenShot" Margin="4,0,0,0" />
@@ -246,7 +208,7 @@
                             <TextBlock Margin="0,6,0,0"
                                        Foreground="{DynamicResource LauncherHeroMutedBrush}"
                                        FontSize="12"
-                                       Text="Region capture, scrolling window stitch, and image annotation handoff."
+                                       Text="Your captures are saved automatically to the gallery."
                                        TextWrapping="Wrap" />
                         </StackPanel>
                         
@@ -294,7 +256,7 @@
                            FontSize="14" 
                            FontWeight="Bold" 
                            Foreground="{DynamicResource LauncherTextBrush}" 
-                           Text="Shortcuts &amp; Actions" />
+                           Text="Capture shortcuts" />
 
                 <!-- 3. Prominent Action Cards (StackPanel) -->
                 <StackPanel Grid.Row="2" Margin="0,0,0,14">
@@ -318,8 +280,8 @@
                             
                             <!-- Title & Description -->
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0,0,0">
-                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Interactive Capture Hub" />
-                                <TextBlock FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Open interactive selector menu at cursor screen position." />
+                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Capture menu" />
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Choose a capture mode or set a timer." />
                             </StackPanel>
                             
                             <!-- Hotkey Badges -->
@@ -352,8 +314,8 @@
                             
                             <!-- Title & Description -->
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0,0,0">
-                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Instant Capture to Clipboard" />
-                                <TextBlock FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Crop a screen region directly into your clipboard." />
+                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Capture to clipboard" />
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Select a window or drag a region, then paste it anywhere." />
                             </StackPanel>
                             
                             <!-- Hotkey Badges -->
@@ -366,7 +328,7 @@
                         </Grid>
                     </Button>
 
-                    <!-- Card 3: Capture straight to Editor -->
+                    <!-- Card 3: Capture to editor -->
                     <Button Margin="0,0,0,8" Height="58"
                             Style="{StaticResource LauncherActionCardStyle}"
                             Click="BeginEditorCaptureFromGrid_Click">
@@ -386,8 +348,8 @@
                             
                             <!-- Title & Description -->
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0,0,0">
-                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Capture straight to Editor" />
-                                <TextBlock FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Draw a region and load it into the annotator directly." />
+                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Capture to editor" />
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Select a window or drag a region to annotate." />
                             </StackPanel>
                             
                             <!-- Hotkey Badges -->
@@ -400,7 +362,7 @@
                         </Grid>
                     </Button>
 
-                    <!-- Card 4: Open Clipboard in Editor -->
+                    <!-- Card 4: Edit clipboard contents -->
                     <Button Margin="0,0,0,8" Height="58"
                             Style="{StaticResource LauncherActionCardStyle}"
                             Click="BeginClipboardEditorFromGrid_Click">
@@ -420,8 +382,8 @@
                             
                             <!-- Title & Description -->
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0,0,0">
-                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Open Clipboard in Editor" />
-                                <TextBlock FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Import copied image or generate a smart summary from clipboard." />
+                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Edit clipboard contents" />
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Open a copied image or turn copied text into an image." />
                             </StackPanel>
                             
                             <!-- Hotkey Badges -->
@@ -434,7 +396,7 @@
                         </Grid>
                     </Button>
 
-                    <!-- Card 5: Stitch Scrolling Window -->
+                    <!-- Card 5: Capture a scrolling window -->
                     <Button Margin="0,0,0,0" Height="58"
                             Style="{StaticResource LauncherActionCardStyle}"
                             Click="BeginScrollingWindowCaptureFromGrid_Click">
@@ -454,8 +416,8 @@
                             
                             <!-- Title & Description -->
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0,0,0">
-                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Stitch Scrolling Window" />
-                                <TextBlock FontSize="10.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Select a vertical scrolling area to automatically capture and stitch." />
+                                <TextBlock FontWeight="Bold" FontSize="13" Foreground="{DynamicResource LauncherTextBrush}" Text="Capture a scrolling window" />
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Combine a scrolling area into one tall screenshot." />
                             </StackPanel>
                             
                             <!-- Hotkey Badges -->
@@ -484,7 +446,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock FontSize="13" FontWeight="Bold" Foreground="{DynamicResource LauncherTextBrush}" Text="Start with Windows" />
-                            <TextBlock Margin="0,2,0,0" FontSize="11" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Quietly boot app in system tray upon login." />
+                            <TextBlock Margin="0,2,0,0" FontSize="11" Foreground="{DynamicResource LauncherMutedTextBrush}" Text="Keep capture shortcuts ready when you sign in." />
                         </StackPanel>
                         <ToggleButton x:Name="StartupToggleButton"
                                       Grid.Column="1"
@@ -495,16 +457,17 @@
                     </Grid>
                 </Border>
 
-                <!-- 5. Demo Editor Sandbox Card (Simple Button Link) -->
-                <Border Grid.Row="4" Margin="0,0,0,12">
-                    <Button Height="36" Style="{StaticResource LauncherSecondaryButtonStyle}" Click="OpenEditorDemo_Click">
-                        <StackPanel Orientation="Horizontal">
-                            <Path Data="M 12,2 C 6.5,2 2,6.5 2,12 C 2,17.5 6.5,22 12,22 C 17.5,22 22,17.5 22,12 C 22,6.5 17.5,2 12,2 Z M 15.3,16.7 L 11,14 L 11,7 L 13,7 L 13,12.8 L 16.7,15.1 Z" 
-                                  Fill="{DynamicResource LauncherTextBrush}" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" Stretch="Uniform"/>
-                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LauncherTextBrush}" Text="Launch Sandbox Demo Editor" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-                </Border>
+                <Grid Grid.Row="4" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Height="36" Margin="0,0,4,0" Style="{StaticResource LauncherSecondaryButtonStyle}"
+                            Click="OpenGallery_Click" Content="Open gallery" FontWeight="SemiBold"
+                            ToolTip="Browse saved captures (Ctrl + Shift + Alt + 0)" />
+                    <Button Grid.Column="1" Height="36" Margin="4,0,0,0" Style="{StaticResource LauncherSecondaryButtonStyle}"
+                            Click="OpenEditorDemo_Click" Content="Try the demo editor" />
+                </Grid>
 
                 <!-- 6. Real-Time Update Indicator & Banner (Footer) -->
                 <Grid Grid.Row="5" Margin="0,6,0,0">
@@ -578,24 +541,11 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             
-                            <!-- Pulsing Green Indicator Ring -->
                             <Grid Grid.Column="0" Width="14" Height="14" VerticalAlignment="Center" Margin="0,0,10,0">
-                                <Ellipse x:Name="PulsingCircle" Fill="#4CAF50" Width="8" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                <Ellipse Stroke="#4CAF50" StrokeThickness="1" Width="14" Height="14" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.5">
-                                    <Ellipse.Triggers>
-                                        <EventTrigger RoutedEvent="Loaded">
-                                            <BeginStoryboard>
-                                                <Storyboard RepeatBehavior="Forever">
-                                                    <DoubleAnimation Storyboard.TargetProperty="Width" From="8" To="14" Duration="0:0:1.5"/>
-                                                    <DoubleAnimation Storyboard.TargetProperty="Height" From="8" To="14" Duration="0:0:1.5"/>
-                                                    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1.0" To="0.0" Duration="0:0:1.5"/>
-                                                </Storyboard>
-                                            </BeginStoryboard>
-                                        </EventTrigger>
-                                    </Ellipse.Triggers>
-                                </Ellipse>
+                                <Ellipse Fill="#224CAF50" />
+                                <Ellipse Fill="#4CAF50" Width="8" Height="8" />
                             </Grid>
-                            
+
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock FontWeight="Bold" FontSize="11.5" Foreground="#FF1E663B" Text="Update Available! "/>
                                 <TextBlock FontSize="11.5" x:Name="UpdateBannerVersionText" Foreground="#FF1E663B" Text="v0.2.19 is ready to install."/>

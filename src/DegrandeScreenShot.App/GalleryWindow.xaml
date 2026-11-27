@@ -36,6 +36,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
                                 CornerRadius="9">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
@@ -43,6 +44,9 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource GalleryActionHoverBrush}" />
                                 <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource GalleryAccentBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource GalleryAccentSubtleBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -73,11 +77,13 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource GalleryAccentBorderBrush}" />
-                                <Setter TargetName="Card" Property="Effect">
-                                    <Setter.Value>
-                                        <DropShadowEffect Color="#33006A93" BlurRadius="14" ShadowDepth="3" Opacity="0.7" />
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter TargetName="Card" Property="Background" Value="{DynamicResource GalleryActionHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource GalleryAccentBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Card" Property="Background" Value="{DynamicResource GalleryAccentSubtleBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -128,6 +134,13 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="StatusText"
+                               Text="Loading screenshots…"
+                               FontSize="12"
+                               Margin="0,0,12,0"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource GalleryMutedTextBrush}"
+                               AutomationProperties.LiveSetting="Polite" />
                     <Button Content="Open folder"
                             Margin="0,0,10,0"
                             Style="{StaticResource GalleryActionButtonStyle}"
@@ -139,7 +152,7 @@
             </Grid>
         </Border>
 
-        <ListBox x:Name="DayGroupsItemsControl"
+        <ListBox x:Name="GalleryRows"
                  Grid.Row="1"
                  Padding="28,24,12,28"
                  Background="Transparent"
@@ -147,12 +160,18 @@
                  ItemContainerStyle="{StaticResource GalleryDayGroupItemStyle}"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  ScrollViewer.VerticalScrollBarVisibility="Auto"
-                 ScrollViewer.CanContentScroll="False"
+                 ScrollViewer.CanContentScroll="True"
+                 ScrollViewer.ScrollChanged="Gallery_ScrollChanged"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling"
+                 VirtualizingPanel.ScrollUnit="Pixel"
+                 VirtualizingPanel.CacheLength="0.5"
+                 VirtualizingPanel.CacheLengthUnit="Page"
                  ScrollViewer.PanningMode="VerticalOnly">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <StackPanel Margin="0,0,0,16">
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12" Visibility="{Binding HeaderVisibility}">
                                 <TextBlock Text="{Binding Header}"
                                            FontSize="20"
                                            FontWeight="SemiBold"
@@ -171,7 +190,7 @@
                             <ItemsControl ItemsSource="{Binding Screenshots}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
-                                        <WrapPanel />
+                                        <StackPanel Orientation="Horizontal" />
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
@@ -190,9 +209,29 @@
                                                     <RowDefinition Height="*" />
                                                 </Grid.RowDefinitions>
                                                 <Border Background="{DynamicResource GalleryThumbnailBackdropBrush}" CornerRadius="11,11,0,0" ClipToBounds="True">
-                                                    <Image Source="{Binding Thumbnail}"
-                                                           Stretch="UniformToFill"
-                                                           RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    <Grid>
+                                                        <Image x:Name="Thumbnail"
+                                                               Loaded="Thumbnail_Loaded"
+                                                               Unloaded="Thumbnail_Unloaded"
+                                                               DataContextChanged="Thumbnail_DataContextChanged"
+                                                               Stretch="UniformToFill"
+                                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                                        <TextBlock Text="Preview unavailable"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource GalleryMutedTextBrush}">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Tag, ElementName=Thumbnail}" Value="Unavailable">
+                                                                            <Setter Property="Visibility" Value="Visible" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </Grid>
                                                 </Border>
                                                 <Grid Grid.Row="1" Margin="12,8,12,9">
                                                     <Grid.ColumnDefinitions>

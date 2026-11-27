@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Windows;
 using System.Windows.Media.Imaging;
 
 namespace DegrandeScreenShot.App.Services;
@@ -25,54 +26,78 @@ public sealed class ScreenshotLibraryService
     {
         ArgumentNullException.ThrowIfNull(image);
 
-        var path = CreateCapturePath(capturedAt ?? DateTime.Now);
-        SavePng(image, path, createNew: true);
-        return path;
+        return SaveNewCapture(CaptureName(capturedAt ?? DateTime.Now), stream => WritePng(image, stream));
     }
 
-    public string CreateCapturePath(DateTime capturedAt)
+    public string SaveCapture(Stream png, DateTime capturedAt)
     {
-        Directory.CreateDirectory(RootDirectory);
-        var baseName = $"{FileNamePrefix} {capturedAt:yyyy-MM-dd HH-mm-ss}";
-        return CreateAvailablePath(RootDirectory, baseName);
-    }
-
-    public string CreateEditedPath(string sourcePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
-        Directory.CreateDirectory(RootDirectory);
-
-        var sourceName = Path.GetFileNameWithoutExtension(sourcePath);
-        var baseName = EditedSuffixRegex.Replace(sourceName, string.Empty);
-        var firstCandidate = Path.Combine(RootDirectory, $"{baseName} - Edited.png");
-        if (!File.Exists(firstCandidate))
+        ArgumentNullException.ThrowIfNull(png);
+        if (png.CanSeek)
         {
-            return firstCandidate;
+            png.Position = 0;
         }
 
-        for (var version = 2; ; version++)
+        return SaveNewCapture(CaptureName(capturedAt), png.CopyTo);
+    }
+
+    public string SaveEditedCapture(BitmapSource image, string sourcePath)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        return SaveNewCapture(EditedName(sourcePath), stream => WritePng(image, stream));
+    }
+
+    private string SaveNewCapture(string baseName, Action<Stream> write)
+    {
+        Directory.CreateDirectory(RootDirectory);
+        var temporaryPath = Path.Combine(RootDirectory, $"{Guid.NewGuid():N}.tmp");
+        try
         {
-            var candidate = Path.Combine(RootDirectory, $"{baseName} - Edited ({version}).png");
-            if (!File.Exists(candidate))
+            using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                return candidate;
+                write(stream);
+            }
+
+            // Publish only complete PNGs. Two captures can finish within the same second.
+            for (var version = 1; ; version++)
+            {
+                var path = VersionPath(baseName, version);
+                try
+                {
+                    File.Move(temporaryPath, path);
+                    return path;
+                }
+                catch (IOException exception) when ((exception.HResult & 0xFFFF) is 80 or 183)
+                {
+                    // ERROR_FILE_EXISTS / ERROR_ALREADY_EXISTS
+                }
             }
         }
+        catch
+        {
+            File.Delete(temporaryPath);
+            throw;
+        }
+    }
+
+    public string CreateCapturePath(DateTime capturedAt) => CreateAvailablePath(CaptureName(capturedAt));
+
+    public string CreateEditedPath(string sourcePath) => CreateAvailablePath(EditedName(sourcePath));
+
+    private static string CaptureName(DateTime capturedAt) => $"{FileNamePrefix} {capturedAt:yyyy-MM-dd HH-mm-ss}";
+
+    private static string EditedName(string sourcePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        var sourceName = Path.GetFileNameWithoutExtension(sourcePath);
+        return EditedSuffixRegex.Replace(sourceName, string.Empty) + " - Edited";
     }
 
     public IReadOnlyList<ScreenshotLibraryItem> GetScreenshots()
     {
-        if (!Directory.Exists(RootDirectory))
-        {
-            return [];
-        }
-
         try
         {
-            return Directory
-                .EnumerateFiles(RootDirectory, "*.png", SearchOption.TopDirectoryOnly)
-                .Select(path => new FileInfo(path))
-                .Where(file => file.Exists)
+            return new DirectoryInfo(RootDirectory)
+                .EnumerateFiles("*.png", SearchOption.TopDirectoryOnly)
                 .Select(file => new ScreenshotLibraryItem(
                     file.FullName,
                     file.Name,
@@ -93,35 +118,49 @@ public sealed class ScreenshotLibraryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        var effectiveDecodePixelWidth = GetEffectiveDecodePixelWidth(path, decodePixelWidth);
+        using var stream = OpenImageStream(path);
+        if (decodePixelWidth > 0)
+        {
+            var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0];
+            decodePixelWidth = Math.Min(frame.PixelWidth, decodePixelWidth);
+            stream.Position = 0;
+        }
+
+        return DecodeImage(stream, decodePixelWidth, Int32Rect.Empty);
+    }
+
+    internal static BitmapSource LoadGalleryThumbnail(string path)
+    {
+        // Crop to the visible card before scaling. Tall scrolling captures then cost
+        // the same thumbnail memory as ordinary screenshots and keep their detail.
+        const double aspectRatio = 240d / 156;
+        using var stream = OpenImageStream(path);
+        var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0];
+        var width = Math.Max(1, (int)Math.Min(frame.PixelWidth, Math.Round(frame.PixelHeight * aspectRatio)));
+        var height = Math.Max(1, (int)Math.Min(frame.PixelHeight, Math.Round(frame.PixelWidth / aspectRatio)));
+        var crop = new Int32Rect((frame.PixelWidth - width) / 2, (frame.PixelHeight - height) / 2, width, height);
+        stream.Position = 0;
+        return DecodeImage(stream, Math.Min(width, 480), crop);
+    }
+
+    private static FileStream OpenImageStream(string path) =>
+        new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+    private static BitmapSource DecodeImage(Stream stream, int decodePixelWidth, Int32Rect crop)
+    {
         var image = new BitmapImage();
         image.BeginInit();
         image.CacheOption = BitmapCacheOption.OnLoad;
-        if (effectiveDecodePixelWidth > 0)
+        image.SourceRect = crop;
+        if (decodePixelWidth > 0)
         {
-            image.DecodePixelWidth = effectiveDecodePixelWidth;
+            image.DecodePixelWidth = decodePixelWidth;
         }
 
-        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-        {
-            image.StreamSource = stream;
-            image.EndInit();
-        }
-
+        image.StreamSource = stream;
+        image.EndInit();
         image.Freeze();
         return image;
-    }
-
-    private static int GetEffectiveDecodePixelWidth(string path, int requestedWidth)
-    {
-        if (requestedWidth <= 0)
-        {
-            return 0;
-        }
-
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
-        return decoder.Frames[0].PixelWidth > requestedWidth ? requestedWidth : 0;
     }
 
     public static void SavePng(BitmapSource image, string path, bool createNew = false)
@@ -135,27 +174,30 @@ public sealed class ScreenshotLibraryService
             Directory.CreateDirectory(directory);
         }
 
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(image));
         using var stream = new FileStream(
             path,
             createNew ? FileMode.CreateNew : FileMode.Create,
             FileAccess.Write,
             FileShare.Read);
+        WritePng(image, stream);
+    }
+
+    private static void WritePng(BitmapSource image, Stream stream)
+    {
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(image));
         encoder.Save(stream);
     }
 
-    private static string CreateAvailablePath(string directory, string baseName)
-    {
-        var firstCandidate = Path.Combine(directory, $"{baseName}.png");
-        if (!File.Exists(firstCandidate))
-        {
-            return firstCandidate;
-        }
+    private string VersionPath(string baseName, int version) =>
+        Path.Combine(RootDirectory, version == 1 ? $"{baseName}.png" : $"{baseName} ({version}).png");
 
-        for (var suffix = 2; ; suffix++)
+    private string CreateAvailablePath(string baseName)
+    {
+        Directory.CreateDirectory(RootDirectory);
+        for (var version = 1; ; version++)
         {
-            var candidate = Path.Combine(directory, $"{baseName} ({suffix}).png");
+            var candidate = VersionPath(baseName, version);
             if (!File.Exists(candidate))
             {
                 return candidate;

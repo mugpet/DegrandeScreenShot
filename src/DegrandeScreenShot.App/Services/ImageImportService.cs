@@ -78,7 +78,7 @@ internal static class ImageImportService
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("image/bmp"));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("image/tiff"));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*", 0.1));
-        using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         if (response.Content.Headers.ContentLength is > MaximumDownloadBytes)
@@ -86,14 +86,14 @@ internal static class ImageImportService
             throw new InvalidDataException("The image is larger than the 50 MB download limit.");
         }
 
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var imageStream = new MemoryStream();
         var buffer = new byte[81920];
         long totalBytes = 0;
 
         while (true)
         {
-            var bytesRead = await responseStream.ReadAsync(buffer, cancellationToken);
+            var bytesRead = await responseStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
             if (bytesRead == 0)
             {
                 break;
@@ -105,7 +105,7 @@ internal static class ImageImportService
                 throw new InvalidDataException("The image is larger than the 50 MB download limit.");
             }
 
-            await imageStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+            await imageStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
         }
 
         imageStream.Position = 0;

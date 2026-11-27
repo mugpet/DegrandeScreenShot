@@ -10,7 +10,11 @@ internal sealed class EditorPreferencesStore
         WriteIndented = true,
     };
 
-    private readonly string _preferencesPath = Path.Combine(
+    private static readonly object SaveLock = new();
+    private static EditorPreferences? _pendingPreferences;
+    private static bool _writerRunning;
+
+    private static readonly string PreferencesPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "DegrandeScreenShot",
         "editor-preferences.json");
@@ -19,14 +23,22 @@ internal sealed class EditorPreferencesStore
 
     internal EditorPreferences Load()
     {
+        lock (SaveLock)
+        {
+            if (_pendingPreferences is { } pending)
+            {
+                return pending;
+            }
+        }
+
         try
         {
-            if (!File.Exists(_preferencesPath))
+            if (!File.Exists(PreferencesPath))
             {
                 return EditorPreferences.Default;
             }
 
-            var json = File.ReadAllText(_preferencesPath);
+            var json = File.ReadAllText(PreferencesPath);
             return JsonSerializer.Deserialize<EditorPreferences>(json, SerializerOptions) ?? EditorPreferences.Default;
         }
         catch
@@ -37,33 +49,69 @@ internal sealed class EditorPreferencesStore
 
     internal void Save(EditorPreferences preferences)
     {
-        var wasSaved = false;
-        try
+        lock (SaveLock)
         {
-            var directory = Path.GetDirectoryName(_preferencesPath);
-            if (!string.IsNullOrWhiteSpace(directory))
+            _pendingPreferences = preferences;
+            if (_writerRunning)
             {
-                Directory.CreateDirectory(directory);
+                return;
+            }
+            _writerRunning = true;
+        }
+
+        _ = App.TrackOutputAsync(WritePendingPreferencesAsync());
+    }
+
+    private static async Task WritePendingPreferencesAsync()
+    {
+        while (true)
+        {
+            // Coalesce slider changes from all editor windows into a single ordered writer.
+            await Task.Delay(200).ConfigureAwait(false);
+            EditorPreferences snapshot;
+            lock (SaveLock)
+            {
+                snapshot = _pendingPreferences!;
             }
 
-            var json = JsonSerializer.Serialize(preferences, SerializerOptions);
-            File.WriteAllText(_preferencesPath, json);
-            wasSaved = true;
-        }
-        catch
-        {
-            // Ignore persistence errors and keep the editor usable.
-        }
-
-        if (wasSaved)
-        {
+            bool saved = false;
+            string temporaryPath = $"{PreferencesPath}.{Guid.NewGuid():N}.tmp";
             try
             {
-                PreferencesChanged?.Invoke(this, EventArgs.Empty);
+                Directory.CreateDirectory(Path.GetDirectoryName(PreferencesPath)!);
+                File.WriteAllText(temporaryPath, JsonSerializer.Serialize(snapshot, SerializerOptions));
+                File.Move(temporaryPath, PreferencesPath, overwrite: true);
+                saved = true;
             }
             catch
             {
-                // Preference listeners must never make editor settings unusable.
+                try { File.Delete(temporaryPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+
+            bool finished;
+            lock (SaveLock)
+            {
+                finished = ReferenceEquals(snapshot, _pendingPreferences);
+                if (finished)
+                {
+                    _pendingPreferences = null;
+                    _writerRunning = false;
+                }
+            }
+            if (saved)
+            {
+                try
+                {
+                    PreferencesChanged?.Invoke(null, EventArgs.Empty);
+                }
+                catch
+                {
+                    // A listener must not prevent subsequent preference updates.
+                }
+            }
+            if (finished)
+            {
+                return;
             }
         }
     }

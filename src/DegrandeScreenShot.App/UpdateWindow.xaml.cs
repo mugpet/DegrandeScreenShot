@@ -172,6 +172,7 @@ public partial class UpdateWindow : Window
             StatusTextBlock.Text = "Download complete! Launching installer...";
             await Task.Delay(800); // Brief visual confirmation for user
 
+            await App.WaitForPendingOutputsAsync();
             UpdateService.ExecuteInstallerAndExit(tempFilePath);
         }
         catch (OperationCanceledException)
