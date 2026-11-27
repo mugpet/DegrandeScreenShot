@@ -11,6 +11,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
@@ -69,8 +70,14 @@ public partial class EditorWindow : Window
     private const int DwmCaptionColorAttribute = 35;
     private const int DwmTextColorAttribute = 36;
     private const uint DwmColorDefault = 0xFFFFFFFF;
-    private const double SelectionActionIslandSpacing = 18;
-    private const double SelectionActionIslandViewportPadding = 18;
+    private const double WorkspaceInset = 12;
+    private const double InspectorWidth = 252;
+    private const double SideDockBreakpoint = 760;
+    private FrameworkElement? _openInspectorPage;
+    private bool _propertiesVisible = true;
+    private bool _fitToViewport = true;
+    private bool _enlargeToFit;
+    private bool _fitQueued;
     private const double MinZoomLevel = 0.05;
     private const double MaxZoomLevel = 4.0;
     private const double ZoomStepFactor = 1.15;
@@ -117,6 +124,7 @@ public partial class EditorWindow : Window
     private AnnotationBase? _selectedAnnotation;
     private AnnotationBase? _hoveredAnnotation;
     private AnnotationBase? _contextMenuAnnotation;
+    private Color? _displayedAnnotationColor;
     private Rect? _cropSelection;
     private Rect? _cropDragOrigin;
     private EditorTool? _pendingDrawTool;
@@ -194,7 +202,7 @@ public partial class EditorWindow : Window
     private double _lastObscureColorStrength = DefaultObscureColorStrength;
     private double _lastObscureBlurLevel = DefaultObscureBlurLevel;
     private double _lastObscurePixelationLevel = DefaultObscurePixelationLevel;
-    private readonly EditorPreferencesStore _preferencesStore = new();
+    private readonly IEditorPreferencesStore _preferencesStore;
     private CancellationTokenSource? _imageImportCts;
 
     public EditorWindow(
@@ -202,8 +210,22 @@ public partial class EditorWindow : Window
         string? sourcePath = null,
         CapturedCursor? capturedCursor = null,
         Task<string?>? pendingSourcePath = null)
+        : this(new EditorPreferencesStore(), baseImage, sourcePath, capturedCursor, pendingSourcePath)
     {
+    }
+
+    internal EditorWindow(
+        IEditorPreferencesStore preferencesStore,
+        BitmapSource baseImage,
+        string? sourcePath = null,
+        CapturedCursor? capturedCursor = null,
+        Task<string?>? pendingSourcePath = null)
+    {
+        _preferencesStore = preferencesStore;
+        // WPF coerces slider values to their minimum while loading the inspector.
+        _suppressArrowSliderEvents = true;
         InitializeComponent();
+        _suppressArrowSliderEvents = false;
         ApplyEditorPreferences(_preferencesStore.Load());
         _workingImage = baseImage;
         _baseImageOriginal = baseImage;
@@ -244,7 +266,6 @@ public partial class EditorWindow : Window
 
     private void EditorWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        AttachSelectionActionIslandToFooter();
         MeasureDisplayedImageSize();
 
         if (_hasFittedInitialWindowSize)
@@ -254,30 +275,6 @@ public partial class EditorWindow : Window
 
         _hasFittedInitialWindowSize = true;
         Dispatcher.BeginInvoke(new Action(FitWindowToArtwork), System.Windows.Threading.DispatcherPriority.Loaded);
-    }
-
-    private void AttachSelectionActionIslandToFooter()
-    {
-        if (ReferenceEquals(SelectionActionIsland.Parent, EditorFooterStack))
-        {
-            return;
-        }
-
-        if (SelectionActionIsland.Parent is Panel currentParent)
-        {
-            currentParent.Children.Remove(SelectionActionIsland);
-        }
-
-        SelectionActionIsland.Margin = new Thickness(0, 0, 0, 14);
-        SelectionActionIsland.HorizontalAlignment = HorizontalAlignment.Center;
-        SelectionActionIsland.VerticalAlignment = VerticalAlignment.Center;
-        SelectionActionIslandTransform.X = 0;
-        SelectionActionIslandTransform.Y = 0;
-
-        var toolbarIndex = EditorFooterStack.Children.IndexOf(ToolbarIsland);
-        EditorFooterStack.Children.Insert(
-            toolbarIndex >= 0 ? toolbarIndex : EditorFooterStack.Children.Count,
-            SelectionActionIsland);
     }
 
     private void EditorWindow_SourceInitialized(object? sender, EventArgs e)
@@ -316,6 +313,7 @@ public partial class EditorWindow : Window
     {
         UpdateMaxWindowSize();
         ApplyZoomTransform();
+        QueueFitToViewport();
     }
 
     private void EditorWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -386,7 +384,6 @@ public partial class EditorWindow : Window
 
         SetBrushColor("ShellBackgroundBrush", palette.ShellBackground);
         SetBrushColor("EditorWorkspaceBrush", palette.EditorWorkspace);
-        SetBrushColor("EditorCanvasBrush", palette.EditorCanvas);
         SetBrushColor("IslandBackgroundBrush", palette.IslandBackground);
         SetBrushColor("IslandBorderBrush", palette.IslandBorder);
         SetBrushColor("IslandButtonBrush", palette.IslandButton);
@@ -394,6 +391,7 @@ public partial class EditorWindow : Window
         SetBrushColor("IslandButtonPressedBrush", palette.IslandButtonPressed);
         SetBrushColor("IslandButtonActiveBrush", palette.IslandButtonActive);
         SetBrushColor("IslandButtonActiveBorderBrush", palette.IslandButtonActiveBorder);
+        SetBrushColor("EditorFocusBrush", palette.EditorFocus);
         SetBrushColor("IslandTextBrush", palette.IslandText);
         SetBrushColor("IslandMutedTextBrush", palette.IslandMutedText);
         SetBrushColor("PrimaryButtonBrush", palette.PrimaryButton);
@@ -404,15 +402,9 @@ public partial class EditorWindow : Window
         SetBrushColor("SecondaryButtonBorderBrush", palette.SecondaryButtonBorder);
         SetBrushColor("SecondaryButtonHoverBrush", palette.SecondaryButtonHover);
         SetBrushColor("SecondaryButtonPressedBrush", palette.SecondaryButtonPressed);
-        SetBrushColor("FloatingCardBrush", palette.FloatingCard);
-        SetBrushColor("FloatingCardBorderBrush", palette.FloatingCardBorder);
-        SetBrushColor("ShellScrimBrush", palette.ShellScrim);
-        SetBrushColor("ShellTopHighlightBrush", palette.ShellTopHighlight);
         SetBrushColor("InlineTextInputBackgroundBrush", palette.InlineTextInputBackground);
         SetBrushColor("InlineTextInputBorderBrush", palette.InlineTextInputBorder);
         SetBrushColor("InlineTextInputForegroundBrush", palette.InlineTextInputForeground);
-        SetBrushColor("PopupPanelBackgroundBrush", palette.PopupPanelBackground);
-        SetBrushColor("PopupPanelBorderBrush", palette.PopupPanelBorder);
         SetBrushColor("DeleteButtonBackgroundBrush", palette.DeleteButtonBackground);
         SetBrushColor("DeleteButtonBorderBrush", palette.DeleteButtonBorder);
         SetBrushColor("DeleteButtonForegroundBrush", palette.DeleteButtonForeground);
@@ -426,7 +418,6 @@ public partial class EditorWindow : Window
         SetBrushColor("EditorSliderFillHoverBrush", palette.SliderFillHover);
         SetBrushColor("EditorSliderThumbBrush", palette.SliderThumb);
         SetBrushColor("EditorSliderThumbBorderBrush", palette.SliderThumbBorder);
-        SetGradientBrushColors("ShellGlowBrush", palette.GlowStart, palette.GlowMiddle, palette.GlowEnd);
         UpdateThemeModeButton();
         ApplyNativeTitleBarTheme();
         _renderedImage = null;
@@ -471,19 +462,6 @@ public partial class EditorWindow : Window
     private void SetBrushColor(string resourceKey, Color color)
     {
         Resources[resourceKey] = new SolidColorBrush(color);
-    }
-
-    private void SetGradientBrushColors(string resourceKey, Color startColor, Color middleColor, Color endColor)
-    {
-        Resources[resourceKey] = new LinearGradientBrush(
-            new GradientStopCollection
-            {
-                new(startColor, 0),
-                new(middleColor, 0.4),
-                new(endColor, 0.9),
-            },
-            new Point(0, 0),
-            new Point(1, 1));
     }
 
     private void ApplyNativeTitleBarTheme()
@@ -532,14 +510,6 @@ public partial class EditorWindow : Window
     {
         _contextMenuAnnotation = null;
 
-        foreach (var button in new[] { SelectToolButton, CropToolButton, ArrowToolButton, RectangleToolButton, EllipseToolButton, ObscureToolButton, HighlightToolButton, TextToolButton })
-        {
-            if (!ReferenceEquals(button, sender))
-            {
-                button.IsChecked = false;
-            }
-        }
-
         if (sender is ToggleButton toggleButton && Enum.TryParse<EditorTool>(toggleButton.Tag?.ToString(), out var tool))
         {
             if (tool != EditorTool.Text)
@@ -562,13 +532,22 @@ public partial class EditorWindow : Window
                 RestoreCropPreviewReturnState();
             }
 
+            if (_currentTool != tool && tool != EditorTool.Select && _selectedAnnotation is not null
+                && ToolForAnnotation(_selectedAnnotation) != tool)
+            {
+                _selectedAnnotation = null;
+                _hoveredAnnotation = null;
+            }
             _currentTool = tool;
+            if (_openInspectorPage is not null && _propertiesVisible)
+            {
+                ShowInspectorPage(null);
+            }
             if (tool != EditorTool.Crop)
             {
                 _cropSelection = null;
             }
 
-            UpdateSelectionAnnotationControls(_selectedAnnotation);
             RefreshCanvas();
             UpdateEditorCursor();
         }
@@ -576,6 +555,7 @@ public partial class EditorWindow : Window
 
     private void AnnotationCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        FinishResizeFieldBeforeCanvasClick();
         _contextMenuAnnotation = null;
 
         Focus();
@@ -660,7 +640,6 @@ public partial class EditorWindow : Window
             _selectedAnnotation = null;
             _hoveredAnnotation = null;
             _contextMenuAnnotation = null;
-            UpdateSelectionAnnotationControls(null);
             BeginViewportPan(e.GetPosition(ArtworkScrollViewer));
             RefreshCanvas();
             return;
@@ -951,6 +930,7 @@ public partial class EditorWindow : Window
 
     private void AnnotationCanvas_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
+        FinishResizeFieldBeforeCanvasClick();
         if (SelectToolButton.IsChecked != true)
         {
             ActivateSelectTool();
@@ -1005,7 +985,6 @@ public partial class EditorWindow : Window
         _dragStart = null;
         _dragOperation = DragOperation.None;
         _activeHandle = annotation.HitHandle(point);
-        UpdateSelectionAnnotationControls(annotation);
         RefreshCanvas();
         e.Handled = true;
     }
@@ -1063,12 +1042,6 @@ public partial class EditorWindow : Window
             CommitHistoryState();
         }
 
-        if (_selectedAnnotation is not null)
-        {
-            _contextMenuAnnotation = _selectedAnnotation;
-            UpdateSelectionAnnotationControls(_selectedAnnotation);
-        }
-
         RefreshCanvas();
         UpdateEditorCursor(e.GetPosition(AnnotationCanvas));
     }
@@ -1119,11 +1092,12 @@ public partial class EditorWindow : Window
 
     private void ColorOption_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not string colorValue || ColorConverter.ConvertFromString(colorValue) is not Color color)
+        if (sender is not RadioButton { Background: SolidColorBrush swatch })
         {
             return;
         }
 
+        var color = swatch.Color;
         if (_contextMenuAnnotation is null)
         {
             if (_currentTool == EditorTool.Arrow)
@@ -1427,12 +1401,12 @@ public partial class EditorWindow : Window
     private void ResizeImageButton_Click(object sender, RoutedEventArgs e)
     {
         UpdateImageResizeControls(_contextMenuAnnotation as ImageAnnotation);
-        ImageResizePopup.IsOpen = !ImageResizePopup.IsOpen;
+        ShowInspectorPage(_openInspectorPage == ResizePanel ? null : ResizePanel);
     }
 
     private void ImageResizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (ImageResizeValueLabel is null || _isUpdatingImageResize)
+        if (_workingImage is null || ImageResizeValueLabel is null || _isUpdatingImageResize)
         {
             return;
         }
@@ -1482,12 +1456,31 @@ public partial class EditorWindow : Window
         else if (e.Key == Key.Escape)
         {
             UpdateImageResizeControls(_contextMenuAnnotation as ImageAnnotation);
-
+            _isUpdatingImageResize = true;
+            try
+            {
+                InspectorBackButton.Focus();
+            }
+            finally
+            {
+                _isUpdatingImageResize = false;
+            }
             e.Handled = true;
         }
     }
 
-    private void ApplyImageDimensionValue(TextBox textBox)
+    private void FinishResizeFieldBeforeCanvasClick()
+    {
+        if (Keyboard.FocusedElement is TextBox field && (field == ImageWidthTextBox || field == ImageHeightTextBox))
+        {
+            // A canvas click changes the resize target before the ScrollViewer takes focus.
+            // Commit against the current target and let the selection draw the updated canvas.
+            ApplyImageDimensionValue(field, refreshCanvas: false);
+            ArtworkScrollViewer.Focus();
+        }
+    }
+
+    private void ApplyImageDimensionValue(TextBox textBox, bool refreshCanvas = true)
     {
         if (_isUpdatingImageResize)
         {
@@ -1511,9 +1504,17 @@ public partial class EditorWindow : Window
         }
 
         ImageResizeValidationText.Visibility = Visibility.Collapsed;
-        if (_contextMenuAnnotation is ImageAnnotation imageAnnotation)
+        var imageAnnotation = _contextMenuAnnotation as ImageAnnotation;
+        var size = imageAnnotation?.Bounds.Size ?? GetBaseImageResizePixelSize();
+        bool isWidth = ReferenceEquals(textBox, ImageWidthTextBox);
+        if (dimension == Math.Round(isWidth ? size.Width : size.Height))
         {
-            if (ReferenceEquals(textBox, ImageWidthTextBox))
+            textBox.Text = dimension.ToString("0", CultureInfo.CurrentCulture);
+            return;
+        }
+        if (imageAnnotation is not null)
+        {
+            if (isWidth)
             {
                 imageAnnotation.SetWidth(dimension);
             }
@@ -1528,10 +1529,9 @@ public partial class EditorWindow : Window
         }
         else
         {
-            var size = GetBaseImageResizePixelSize();
             var width = size.Width;
             var height = size.Height;
-            if (ReferenceEquals(textBox, ImageWidthTextBox))
+            if (isWidth)
             {
                 width = dimension;
                 if (_isBaseImageAspectRatioLocked)
@@ -1557,7 +1557,10 @@ public partial class EditorWindow : Window
 
         UpdateImageResizeControls(_contextMenuAnnotation as ImageAnnotation);
         CommitHistoryState();
-        RefreshCanvas();
+        if (refreshCanvas)
+        {
+            RefreshCanvas();
+        }
     }
 
     private static bool TryParseImageDimension(string text, out double dimension)
@@ -1625,8 +1628,6 @@ public partial class EditorWindow : Window
             PersistEditorPreferences();
             CommitHistoryState();
             RefreshCanvas();
-            UpdateSelectionAnnotationControls(annotation);
-            UpdateSelectionActionIsland();
         }
     }
 
@@ -1719,11 +1720,9 @@ public partial class EditorWindow : Window
         }
 
         ResetAnnotationToDefaults(_contextMenuAnnotation);
-        UpdateSelectionAnnotationControls(_contextMenuAnnotation);
         PersistEditorPreferences();
         CommitHistoryState();
         RefreshCanvas();
-        UpdateSelectionActionIsland();
     }
 
     private void ResetAnnotationToDefaults(AnnotationBase annotation)
@@ -1902,6 +1901,21 @@ public partial class EditorWindow : Window
             return;
         }
 
+        if (e.Key == Key.Escape && (ImageWidthTextBox.IsKeyboardFocusWithin || ImageHeightTextBox.IsKeyboardFocusWithin))
+        {
+            // Let the input discard its draft before a later Escape closes the inspector.
+            return;
+        }
+        if (e.Key == Key.Escape && _openInspectorPage is not null)
+        {
+            CloseInspectorPage_Click(this, e);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase)
+        {
+            return;
+        }
         var modifiers = Keyboard.Modifiers;
         if (e.Key == Key.Escape && _selectedAnnotation is not null && _editingTextAnnotation is null)
         {
@@ -1942,7 +1956,7 @@ public partial class EditorWindow : Window
 
         if (modifiers.HasFlag(ModifierKeys.Control) && e.Key == Key.D1)
         {
-            FitArtworkToView();
+            ZoomFitToView_Click(sender, e);
             e.Handled = true;
             return;
         }
@@ -1973,8 +1987,6 @@ public partial class EditorWindow : Window
         _selectedAnnotation = null;
         _hoveredAnnotation = null;
         _contextMenuAnnotation = null;
-        UpdateSelectionAnnotationControls(null);
-        UpdateSelectionActionIsland();
         RefreshCanvas();
     }
 
@@ -2020,42 +2032,64 @@ public partial class EditorWindow : Window
 
     private void ZoomFitToView_Click(object sender, RoutedEventArgs e)
     {
+        _enlargeToFit = true;
         FitArtworkToView();
     }
 
+    private void ArtworkViewport_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        QueueFitToViewport();
+    }
+
+    private void QueueFitToViewport()
+    {
+        if (!_fitToViewport || !_hasFittedInitialWindowSize || _fitQueued) return;
+        _fitQueued = true;
+        Dispatcher.InvokeAsync(() =>
+        {
+            _fitQueued = false;
+            if (_fitToViewport && !_isClosed) FitArtworkToView();
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
     private void FitArtworkToView()
+    {
+        if (GetFitZoomLevel() is not double fit) return;
+        SetZoomLevel(_enlargeToFit ? fit : Math.Min(1, fit), fitToViewport: true);
+        CenterArtworkInViewport();
+    }
+
+    private double? GetFitZoomLevel()
     {
         var artworkWidth = ArtworkSurface.Width;
         var artworkHeight = ArtworkSurface.Height;
         if (artworkWidth <= 0 || artworkHeight <= 0)
         {
-            return;
+            return null;
         }
 
-        ArtworkScrollViewer.UpdateLayout();
-        var viewportWidth = ArtworkScrollViewer.ViewportWidth > 0 ? ArtworkScrollViewer.ViewportWidth : ArtworkScrollViewer.ActualWidth;
-        var viewportHeight = ArtworkScrollViewer.ViewportHeight > 0 ? ArtworkScrollViewer.ViewportHeight : ArtworkScrollViewer.ActualHeight;
-        if (viewportWidth <= 0 || viewportHeight <= 0)
-        {
-            return;
-        }
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var width = AvailableFitPixels(ArtworkScrollViewer.ActualWidth, dpi.DpiScaleX);
+        var height = AvailableFitPixels(ArtworkScrollViewer.ActualHeight, dpi.DpiScaleY);
+        if (width <= 0 || height <= 0) return null;
 
-        var horizontalPadding = 64d;
-        var verticalPadding = 176d;
-        var availableWidth = Math.Max(1, viewportWidth - horizontalPadding);
-        var availableHeight = Math.Max(1, viewportHeight - verticalPadding);
-        var fitZoom = Math.Min(availableWidth / artworkWidth, availableHeight / artworkHeight);
-        SetZoomLevel(fitZoom);
-        CenterArtworkInViewport();
+        var atActualWidth = artworkWidth * _workingImage.DpiX / 96;
+        var atActualHeight = artworkHeight * _workingImage.DpiY / 96;
+        return Math.Min(width / atActualWidth, height / atActualHeight);
     }
 
-    private void SetZoomLevel(double zoomLevel)
+    private static double AvailableFitPixels(double viewport, double dpiScale)
     {
-        _zoomLevel = Math.Clamp(zoomLevel, MinZoomLevel, MaxZoomLevel);
+        // WPF rounds each margin and the transformed image to device pixels independently.
+        // Keep a pixel for the last rounding step so fitting never triggers a scrollbar.
+        return Math.Floor(viewport * dpiScale) - 2 * Math.Ceiling(WorkspaceInset * dpiScale) - 1;
+    }
+
+    private void SetZoomLevel(double zoomLevel, bool fitToViewport = false)
+    {
+        _fitToViewport = fitToViewport;
+        _zoomLevel = fitToViewport ? Math.Min(zoomLevel, MaxZoomLevel) : Math.Clamp(zoomLevel, MinZoomLevel, MaxZoomLevel);
         ApplyZoomTransform();
-        UpdateLayout();
-        UpdateSelectionActionIsland();
-        UpdateInlineTextEditorState();
     }
 
     private void InlineTextEditor_TextChanged(object sender, TextChangedEventArgs e)
@@ -2124,7 +2158,7 @@ public partial class EditorWindow : Window
 
         _isExporting = true;
         ExportButtons.IsEnabled = false;
-        ExportStatus.Text = copy ? "Copying…" : "Saving…";
+        ExportStatus.Text = copy ? "Copyingâ€¦" : "Savingâ€¦";
         ExportStatus.Visibility = Visibility.Visible;
         try
         {
@@ -2214,7 +2248,7 @@ public partial class EditorWindow : Window
     {
         ImageUrlStatusText.Visibility = Visibility.Collapsed;
         ImageUrlStatusText.Text = string.Empty;
-        ImageUrlPopup.IsOpen = true;
+        ShowInspectorPage(ImageUrlPanel);
         Dispatcher.BeginInvoke(new Action(() =>
         {
             ImageUrlTextBox.Focus();
@@ -2238,7 +2272,7 @@ public partial class EditorWindow : Window
         {
             await ImportImageUrlAsync(url, GetDefaultImageImportCenter());
             ImageUrlTextBox.Clear();
-            ImageUrlPopup.IsOpen = false;
+            if (_openInspectorPage == ImageUrlPanel) ShowInspectorPage(null);
         }
         catch (OperationCanceledException)
         {
@@ -2260,7 +2294,7 @@ public partial class EditorWindow : Window
     private void CancelImageUrl_Click(object sender, RoutedEventArgs e)
     {
         _imageImportCts?.Cancel();
-        ImageUrlPopup.IsOpen = false;
+        if (_openInspectorPage == ImageUrlPanel) ShowInspectorPage(null);
     }
 
     private void ImageUrlTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -2654,7 +2688,28 @@ public partial class EditorWindow : Window
 
     private void UpdateSelectionAnnotationControls(AnnotationBase? annotation)
     {
-        ColorActionPanel.Visibility = annotation is ImageAnnotation ? Visibility.Collapsed : Visibility.Visible;
+        Color? color = annotation switch
+        {
+            ArrowAnnotation arrow => arrow.StrokeColor,
+            RectangleAnnotation frame => frame.StrokeColor,
+            EllipseAnnotation circle => circle.StrokeColor,
+            TextAnnotation text => text.TextColor,
+            ObscureAnnotation obscure => obscure.OverlayColor,
+            HighlightAnnotation highlight => highlight.HighlightColor,
+            null when _currentTool == EditorTool.Arrow => _lastArrowColor,
+            _ => null,
+        };
+        ColorActionPanel.Visibility = color.HasValue ? Visibility.Visible : Visibility.Collapsed;
+        SelectedObjectActions.Visibility = annotation is null ? Visibility.Collapsed : Visibility.Visible;
+        if (color is { } active && color != _displayedAnnotationColor)
+        {
+            CurrentColorValue.Text = $"#{active.R:X2}{active.G:X2}{active.B:X2}";
+            foreach (RadioButton choice in ColorChoices.Children)
+            {
+                choice.IsChecked = choice.Background is SolidColorBrush swatch && swatch.Color == active;
+            }
+        }
+        _displayedAnnotationColor = color;
         UpdateImageResizeControls(annotation as ImageAnnotation);
         UpdateArrowAnnotationControls(annotation as ArrowAnnotation);
         UpdateObjectStyleControls(annotation);
@@ -2675,7 +2730,10 @@ public partial class EditorWindow : Window
             HighlightToolButton.IsChecked = true;
         }
 
-        HighlightModePopup.IsOpen = true;
+        if (_propertiesVisible)
+        {
+            ShowInspectorPage(HighlightModesPanel);
+        }
     }
 
     private void HighlightModeOption_Click(object sender, RoutedEventArgs e)
@@ -2687,7 +2745,7 @@ public partial class EditorWindow : Window
         }
 
         SetHighlightMode(mode);
-        HighlightModePopup.IsOpen = false;
+        ShowInspectorPage(null);
     }
 
     private void SetHighlightMode(HighlightMode mode)
@@ -2716,12 +2774,10 @@ public partial class EditorWindow : Window
 
     private void UpdateArrowAnnotationControls(ArrowAnnotation? arrowAnnotation)
     {
-        var shouldShowArrowControls = arrowAnnotation is not null;
+        var shouldShowArrowControls = arrowAnnotation is not null || (_selectedAnnotation is null && _currentTool == EditorTool.Arrow);
         ArrowOptionsPanel.Visibility = shouldShowArrowControls ? Visibility.Visible : Visibility.Collapsed;
-        ArrowPresetButton.Visibility = Visibility.Visible;
         if (!shouldShowArrowControls)
         {
-            ArrowPresetPopup.IsOpen = false;
             UpdateArrowPresetButtonLabel();
             return;
         }
@@ -2768,7 +2824,7 @@ public partial class EditorWindow : Window
         ArrowBorderValueLabel.Text = borderWidth.ToString("0.0", CultureInfo.InvariantCulture);
         UpdateArrowPresetButtonLabel();
 
-        if (ArrowPresetPopup.IsOpen)
+        if (_openInspectorPage == ArrowPresetsPanel)
         {
             RebuildArrowPresetButtons();
         }
@@ -2968,7 +3024,7 @@ public partial class EditorWindow : Window
     private void ArrowPresetButton_Click(object sender, RoutedEventArgs e)
     {
         RebuildArrowPresetButtons();
-        ArrowPresetPopup.IsOpen = !ArrowPresetPopup.IsOpen;
+        ShowInspectorPage(_openInspectorPage == ArrowPresetsPanel ? null : ArrowPresetsPanel);
     }
 
     private void TextAlignLeft_Checked(object sender, RoutedEventArgs e)
@@ -3109,7 +3165,7 @@ public partial class EditorWindow : Window
         }
 
         ApplyArrowPreset(preset);
-        ArrowPresetPopup.IsOpen = false;
+        ShowInspectorPage(null);
     }
 
     private void RebuildArrowPresetButtons()
@@ -3320,11 +3376,6 @@ public partial class EditorWindow : Window
         if (_selectedAnnotation is ArrowAnnotation selectedArrow)
         {
             ApplyLastUsedArrowStyle(selectedArrow);
-            UpdateSelectionAnnotationControls(selectedArrow);
-        }
-        else
-        {
-            UpdateSelectionAnnotationControls(null);
         }
 
         PersistEditorPreferences();
@@ -3466,6 +3517,7 @@ public partial class EditorWindow : Window
     {
         var styleAnnotation = annotation is ArrowAnnotation ? null : annotation as IBorderShadowAnnotation;
         ObjectStylePanel.Visibility = styleAnnotation is null ? Visibility.Collapsed : Visibility.Visible;
+        AppearanceDetails.Visibility = ObjectStylePanel.Visibility;
         if (styleAnnotation is null)
         {
             return;
@@ -3966,12 +4018,9 @@ public partial class EditorWindow : Window
         RefreshAnnotationLayers(editedAnnotationChanged: true);
         var isCropEditingVisible = _currentTool == EditorTool.Crop || _cropSelection is not null;
         CropActionsPanel.Visibility = isCropEditingVisible ? Visibility.Visible : Visibility.Collapsed;
-        UndoCropPanel.Visibility = Visibility.Collapsed;
-        EditorFooterPanel.Visibility = Visibility.Visible;
         ApplyCropButton.IsEnabled = _cropSelection is { Width: > 0, Height: > 0 };
         CancelCropButton.IsEnabled = _currentTool == EditorTool.Crop || _cropSelection is not null;
         UndoCropButton.IsEnabled = _undoHistory.Count > 0;
-        UndoCropShortcutButton.IsEnabled = _undoHistory.Count > 0;
         UndoHistoryButton.IsEnabled = _undoHistory.Count > 0;
         RedoHistoryButton.IsEnabled = _redoHistory.Count > 0;
         UpdateInlineTextEditorState();
@@ -4255,61 +4304,151 @@ public partial class EditorWindow : Window
         }
     }
 
+    private void Workspace_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        bool below = e.NewSize.Width < SideDockBreakpoint;
+        DockPanel.SetDock(InspectorDock, below ? Dock.Bottom : Dock.Right);
+        InspectorDock.Width = below ? double.NaN : InspectorWidth;
+        InspectorDock.Height = below ? Math.Clamp(e.NewSize.Height / 3, 122, 204) : double.NaN;
+        InspectorDock.BorderThickness = below ? new Thickness(0, 1, 0, 0) : new Thickness(1, 0, 0, 0);
+        PropertiesButtonLabel.Visibility = below ? Visibility.Collapsed : Visibility.Visible;
+        UpdateInspectorPropertyLayout(below);
+    }
+
+    private void UpdateInspectorPropertyLayout(bool below)
+    {
+        InspectorHeader.Padding = below ? new Thickness(12, 0, 12, 0) : new Thickness(12, 6, 12, 6);
+        InspectorContent.MaxWidth = below ? double.PositiveInfinity : 440;
+        InspectorContent.Margin = below ? new Thickness(10, 0, 10, 6) : new Thickness(12, 10, 12, 10);
+        DockPanel.SetDock(ObjectScalePanel, below ? Dock.Left : Dock.Top);
+        DockPanel.SetDock(ColorActionPanel, below ? Dock.Left : Dock.Top);
+        ObjectScalePanel.Width = below ? 144 : double.NaN;
+        ColorActionPanel.Width = below ? 206 : double.NaN;
+        ObjectScalePanel.Margin = below ? new Thickness(0, 0, 12, 0) : new Thickness(0, 0, 0, 9);
+        ColorActionPanel.Margin = below ? new Thickness(0, 0, 12, 0) : new Thickness(0);
+        ArrowheadPanel.Margin = below ? new Thickness(0) : new Thickness(0, 6, 0, 4);
+        ArrowWidthFields.Columns = below ? 2 : 1;
+        ArrowBodyProperty.Margin = below ? new Thickness(0, 1, 8, 0) : new Thickness(0, 6, 0, 0);
+        ArrowHeadProperty.Margin = below ? new Thickness(8, 1, 0, 0) : new Thickness(0, 6, 0, 0);
+    }
+
+    private static string ToolTitle(EditorTool tool) => tool switch
+    {
+        EditorTool.Rectangle => "Frame",
+        EditorTool.Ellipse => "Circle",
+        _ => tool.ToString(),
+    };
+
+    private static EditorTool ToolForAnnotation(AnnotationBase annotation) => annotation switch
+    {
+        ArrowAnnotation => EditorTool.Arrow,
+        RectangleAnnotation => EditorTool.Rectangle,
+        EllipseAnnotation => EditorTool.Ellipse,
+        TextAnnotation => EditorTool.Text,
+        HighlightAnnotation => EditorTool.Highlight,
+        ObscureAnnotation => EditorTool.Obscure,
+        _ => EditorTool.Select,
+    };
+
     private void UpdateSelectionActionIsland()
     {
-        if (_currentTool == EditorTool.Crop || _editingTextAnnotation is not null || _selectedAnnotation is null)
+        var selection = _currentTool == EditorTool.Crop || _editingTextAnnotation is not null ? null : _selectedAnnotation;
+        bool documentOverview = _currentTool == EditorTool.Select && _selectedAnnotation is null;
+        DocumentOverviewPanel.Visibility = documentOverview ? Visibility.Visible : Visibility.Collapsed;
+        if (documentOverview)
         {
-            SelectionActionIsland.Visibility = Visibility.Collapsed;
-            LayerActionsIsland.Visibility = Visibility.Collapsed;
-            DeleteActionPanel.Opacity = 1;
-            DeleteActionPanel.IsHitTestVisible = true;
-            UpdateSelectionAnnotationControls(null);
-            return;
+            DocumentAnnotationCount.Text = _annotations.Count == 1 ? "1 annotation" : $"{_annotations.Count} annotations";
         }
 
-        _contextMenuAnnotation = _selectedAnnotation;
-        DeleteActionPanel.Visibility = Visibility.Visible;
-        DeleteActionPanel.Opacity = 1;
-        DeleteActionPanel.IsHitTestVisible = true;
-        UpdateSelectionAnnotationControls(_selectedAnnotation);
+        _contextMenuAnnotation = selection;
+        UpdateSelectionAnnotationControls(selection);
         UpdateLayerActionIsland();
 
-        if (ReferenceEquals(SelectionActionIsland.Parent, EditorFooterStack))
+        bool arrow = selection is ArrowAnnotation || selection is null && _currentTool == EditorTool.Arrow;
+        SelectionActionIsland.Visibility = selection is not null || arrow ? Visibility.Visible : Visibility.Collapsed;
+        ArrowPresetButton.Visibility = arrow ? Visibility.Visible : Visibility.Collapsed;
+        ActiveToolText.Text = ToolTitle(_currentTool);
+
+        var hint = (selection, _currentTool) switch
         {
-            SelectionActionIslandTransform.X = 0;
-            SelectionActionIslandTransform.Y = 0;
-            SelectionActionIsland.Visibility = Visibility.Visible;
-            return;
-        }
+            _ when _editingTextAnnotation is not null => "Press Ctrl+Enter to finish editing text.",
+            (not null, _) => null,
+            (null, EditorTool.Rectangle) => "Drag on the canvas to draw a frame.",
+            (null, EditorTool.Ellipse) => "Drag on the canvas to draw a circle.",
+            (null, EditorTool.Text) => "Click on the canvas to add text.",
+            (null, EditorTool.Obscure) => "Drag across the area to obscure.",
+            (null, EditorTool.Highlight) => "Drag across the area to highlight.",
+            _ => null,
+        };
+        InspectorHint.Text = hint;
+        InspectorHint.Visibility = hint is null ? Visibility.Collapsed : Visibility.Visible;
 
-        SelectionActionIsland.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        ToolbarIsland.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var islandWidth = SelectionActionIsland.DesiredSize.Width;
-        var islandHeight = SelectionActionIsland.DesiredSize.Height;
-        var toolbarWidth = ToolbarIsland.DesiredSize.Width;
-        var toolbarHeight = ToolbarIsland.DesiredSize.Height;
-        var viewportWidth = EditorRootGrid.ActualWidth;
-        var viewportHeight = EditorRootGrid.ActualHeight;
-        var toolbarOrigin = ToolbarIsland.TranslatePoint(new Point(0, 0), EditorRootGrid);
-
-        if (viewportWidth <= 0 || viewportHeight <= 0 || toolbarWidth <= 0 || toolbarHeight <= 0)
+        var heading = _openInspectorPage switch
         {
-            SelectionActionIsland.Visibility = Visibility.Collapsed;
-            return;
+            var p when p == ResizePanel => "Resize image",
+            var p when p == ImageUrlPanel => "Add image from URL",
+            var p when p == ArrowPresetsPanel => "Arrow presets",
+            var p when p == HighlightModesPanel => "Highlight mode",
+            _ when _editingTextAnnotation is not null => "Text",
+            _ when selection is ImageAnnotation => "Image",
+            _ when selection is not null => ToolTitle(ToolForAnnotation(selection)),
+            _ when _currentTool == EditorTool.Select => "Document",
+            _ => ToolTitle(_currentTool),
+        };
+
+        if (InspectorHeading.Text != heading)
+        {
+            InspectorHeading.Text = heading;
+            InspectorScrollViewer.ScrollToTop();
+            var fade = InspectorDock.IsVisible && IsLoaded && SystemParameters.ClientAreaAnimation
+                ? (DoubleAnimation)Resources["InspectorContentFade"]
+                : null;
+            InspectorScrollViewer.BeginAnimation(OpacityProperty, fade);
         }
+    }
 
-        var targetX = toolbarOrigin.X + ((toolbarWidth - islandWidth) / 2);
+    private void InspectorToggle_Click(object sender, RoutedEventArgs e)
+    {
+        _propertiesVisible = InspectorToggle.IsChecked == true;
+        ShowInspectorPage(_propertiesVisible && _currentTool == EditorTool.Highlight && _selectedAnnotation is null
+            ? HighlightModesPanel : null);
+    }
 
-        var targetY = toolbarOrigin.Y - islandHeight - SelectionActionIslandSpacing;
-        var minX = SelectionActionIslandViewportPadding;
-        var maxX = viewportWidth - islandWidth - SelectionActionIslandViewportPadding;
-        var minY = SelectionActionIslandViewportPadding;
-        targetX = Math.Clamp(targetX, minX, Math.Max(minX, maxX));
-        targetY = Math.Max(minY, targetY);
+    private void CloseInspectorPage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_openInspectorPage is null)
+        {
+            _propertiesVisible = false;
+        }
+        ShowInspectorPage(null);
+        InspectorToggle.Focus();
+    }
 
-        SelectionActionIslandTransform.X = targetX;
-        SelectionActionIslandTransform.Y = targetY;
-        SelectionActionIsland.Visibility = Visibility.Visible;
+    private void ShowInspectorPage(FrameworkElement? page)
+    {
+        if (_openInspectorPage == ImageUrlPanel && page != ImageUrlPanel)
+        {
+            _imageImportCts?.Cancel();
+        }
+        if (_openInspectorPage is not null)
+        {
+            _openInspectorPage.Visibility = Visibility.Collapsed;
+        }
+        _openInspectorPage = page;
+        if (page is not null)
+        {
+            page.Visibility = Visibility.Visible;
+        }
+        PropertiesPanel.Visibility = page is null ? Visibility.Visible : Visibility.Collapsed;
+        // Only an explicit panel command may change the space reserved for the canvas.
+        bool show = _propertiesVisible || page is not null;
+        InspectorDock.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        InspectorToggle.IsChecked = show;
+        InspectorToggle.ToolTip = show ? "Hide properties" : "Show properties";
+        bool backToProperties = page is not null && _propertiesVisible;
+        InspectorBackGlyph.Text = backToProperties ? "\uE72B" : "\uE711";
+        InspectorBackButton.ToolTip = backToProperties ? "Back to properties" : page is null ? "Hide properties" : "Close options";
+        UpdateSelectionActionIsland();
     }
 
     private void UpdateLayerActionIsland()
@@ -4330,34 +4469,6 @@ public partial class EditorWindow : Window
         LayerUpButton.IsEnabled = canMoveUp;
         LayerDownButton.IsEnabled = canMoveDown;
         LayerBottomButton.IsEnabled = canMoveDown;
-    }
-
-    private Rect ToOverlayRect(Rect documentRect)
-    {
-        var topLeft = ToOverlayPoint(documentRect.TopLeft);
-        var bottomRight = ToOverlayPoint(documentRect.BottomRight);
-        return new Rect(topLeft, bottomRight);
-    }
-
-    private Point ToOverlayPoint(Point documentPoint)
-    {
-        return AnnotationCanvas.TranslatePoint(ToViewportPoint(documentPoint), EditorRootGrid);
-    }
-
-    private static Rect GetArrowBounds(ArrowAnnotation arrow)
-    {
-        var minX = Math.Min(arrow.Start.X, arrow.End.X);
-        var minY = Math.Min(arrow.Start.Y, arrow.End.Y);
-        var maxX = Math.Max(arrow.Start.X, arrow.End.X);
-        var maxY = Math.Max(arrow.Start.Y, arrow.End.Y);
-        foreach (var bend in arrow.BendPoints)
-        {
-            if (bend.X < minX) minX = bend.X;
-            if (bend.Y < minY) minY = bend.Y;
-            if (bend.X > maxX) maxX = bend.X;
-            if (bend.Y > maxY) maxY = bend.Y;
-        }
-        return new Rect(new Point(minX - 12, minY - 12), new Point(maxX + 12, maxY + 12));
     }
 
     private void UpdateInlineTextEditorState()
@@ -4490,7 +4601,8 @@ public partial class EditorWindow : Window
         {
             return;
         }
-        var dimensions = $"{source.PixelWidth} × {source.PixelHeight}";
+        var dimensions = $"{source.PixelWidth} Ã— {source.PixelHeight}";
+        DocumentDimensions.Text = $"{dimensions} px";
         var size = ReferenceEquals(source, _measuredImage) && _measuredBytes is long bytes ? FormatFileSize(bytes) : null;
         ImageDimensionsText.Text = size is null ? dimensions : $"{dimensions} | {size}";
         ImageDimensionsText.ToolTip = size is null
@@ -4602,7 +4714,7 @@ public partial class EditorWindow : Window
         GrowWindowToFitArtwork();
         CenterWindowOnCurrentScreen();
         UpdateLayout();
-        CenterArtworkInViewport();
+        FitArtworkToView();
     }
 
     private void QueueCenterArtworkInViewport()
@@ -4611,8 +4723,14 @@ public partial class EditorWindow : Window
         {
             return;
         }
-
-        Dispatcher.BeginInvoke(new Action(CenterArtworkInViewport), System.Windows.Threading.DispatcherPriority.Loaded);
+        if (_fitToViewport)
+        {
+            QueueFitToViewport();
+        }
+        else
+        {
+            Dispatcher.BeginInvoke(new Action(CenterArtworkInViewport), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
     }
 
     private void CenterArtworkInViewport()
@@ -4620,7 +4738,6 @@ public partial class EditorWindow : Window
         ArtworkScrollViewer.UpdateLayout();
         ArtworkScrollViewer.ScrollToHorizontalOffset(Math.Max(0, ArtworkScrollViewer.ScrollableWidth / 2));
         ArtworkScrollViewer.ScrollToVerticalOffset(Math.Max(0, ArtworkScrollViewer.ScrollableHeight / 2));
-        UpdateSelectionActionIsland();
         UpdateInlineTextEditorState();
     }
 
@@ -4639,6 +4756,7 @@ public partial class EditorWindow : Window
 
         ArtworkZoomTransform.ScaleX = _zoomLevel * (_workingImage.DpiX / (96.0 * screenDpiScaleX));
         ArtworkZoomTransform.ScaleY = _zoomLevel * (_workingImage.DpiY / (96.0 * screenDpiScaleY));
+        ZoomPercentText.Text = _zoomLevel.ToString(_zoomLevel < 0.01 ? "0.##%" : "P0", CultureInfo.CurrentCulture);
         RenderOptions.SetBitmapScalingMode(
             BaseImage,
             Math.Abs(_zoomLevel - 1.0) < 0.001 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);
@@ -4886,8 +5004,9 @@ public partial class EditorWindow : Window
         }
 
         var targetZoom = e.Delta > 0 ? _zoomLevel * ZoomStepFactor : _zoomLevel / ZoomStepFactor;
-        targetZoom = Math.Clamp(targetZoom, MinZoomLevel, MaxZoomLevel);
-        if (Math.Abs(targetZoom - _zoomLevel) < 0.001)
+        var minimum = Math.Min(MinZoomLevel, GetFitZoomLevel() ?? MinZoomLevel);
+        targetZoom = Math.Clamp(targetZoom, Math.Min(minimum, _zoomLevel), MaxZoomLevel);
+        if (targetZoom == _zoomLevel)
         {
             e.Handled = true;
             return;
@@ -4895,6 +5014,7 @@ public partial class EditorWindow : Window
 
         var mouseInViewer = e.GetPosition(ArtworkScrollViewer);
         var anchorDocumentPoint = ToDocumentPoint(e.GetPosition(AnnotationCanvas));
+        _fitToViewport = false;
         _zoomLevel = targetZoom;
         ApplyZoomTransform();
         UpdateLayout();
@@ -4902,7 +5022,6 @@ public partial class EditorWindow : Window
         var anchorAfterZoom = AnnotationCanvas.TranslatePoint(ToViewportPoint(anchorDocumentPoint), ArtworkScrollViewer);
         ArtworkScrollViewer.ScrollToHorizontalOffset(Math.Clamp(ArtworkScrollViewer.HorizontalOffset + (anchorAfterZoom.X - mouseInViewer.X), 0, ArtworkScrollViewer.ScrollableWidth));
         ArtworkScrollViewer.ScrollToVerticalOffset(Math.Clamp(ArtworkScrollViewer.VerticalOffset + (anchorAfterZoom.Y - mouseInViewer.Y), 0, ArtworkScrollViewer.ScrollableHeight));
-        UpdateSelectionActionIsland();
         UpdateInlineTextEditorState();
         e.Handled = true;
     }
@@ -4914,10 +5033,6 @@ public partial class EditorWindow : Window
             return;
         }
 
-        if (!ReferenceEquals(SelectionActionIsland.Parent, EditorFooterStack))
-        {
-            UpdateSelectionActionIsland();
-        }
         UpdateInlineTextEditorState();
     }
 
@@ -5543,7 +5658,6 @@ public partial class EditorWindow : Window
     private sealed record ThemePalette(
         Color ShellBackground,
         Color EditorWorkspace,
-        Color EditorCanvas,
         Color IslandBackground,
         Color IslandBorder,
         Color IslandButton,
@@ -5551,6 +5665,7 @@ public partial class EditorWindow : Window
         Color IslandButtonPressed,
         Color IslandButtonActive,
         Color IslandButtonActiveBorder,
+        Color EditorFocus,
         Color IslandText,
         Color IslandMutedText,
         Color PrimaryButton,
@@ -5561,15 +5676,9 @@ public partial class EditorWindow : Window
         Color SecondaryButtonBorder,
         Color SecondaryButtonHover,
         Color SecondaryButtonPressed,
-        Color FloatingCard,
-        Color FloatingCardBorder,
-        Color ShellScrim,
-        Color ShellTopHighlight,
         Color InlineTextInputBackground,
         Color InlineTextInputBorder,
         Color InlineTextInputForeground,
-        Color PopupPanelBackground,
-        Color PopupPanelBorder,
         Color DeleteButtonBackground,
         Color DeleteButtonBorder,
         Color DeleteButtonForeground,
@@ -5582,104 +5691,83 @@ public partial class EditorWindow : Window
         Color SliderFill,
         Color SliderFillHover,
         Color SliderThumb,
-        Color SliderThumbBorder,
-        Color GlowStart,
-        Color GlowMiddle,
-        Color GlowEnd)
+        Color SliderThumbBorder)
     {
         internal static readonly ThemePalette Dark = new(
-            ShellBackground: Color.FromRgb(0x1B, 0x20, 0x28),
-            EditorWorkspace: Color.FromRgb(0x20, 0x26, 0x30),
-            EditorCanvas: Color.FromRgb(0x2A, 0x30, 0x39),
-            IslandBackground: Color.FromArgb(0xD9, 0x1A, 0x1E, 0x25),
-            IslandBorder: Color.FromArgb(0x28, 0xFF, 0xFF, 0xFF),
-            IslandButton: Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF),
-            IslandButtonHover: Color.FromArgb(0x1C, 0xFF, 0xFF, 0xFF),
-            IslandButtonPressed: Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF),
-            IslandButtonActive: Color.FromRgb(0x1A, 0xA9, 0xD8),
-            IslandButtonActiveBorder: Color.FromArgb(0x7D, 0xCC, 0xF3, 0xFF),
-            IslandText: Color.FromRgb(0xF4, 0xF7, 0xFB),
-            IslandMutedText: Color.FromArgb(0xA9, 0xC2, 0xCE, 0xDA),
-            PrimaryButton: Color.FromRgb(0x1A, 0xA9, 0xD8),
-            PrimaryButtonBorder: Color.FromArgb(0x7D, 0xCC, 0xF3, 0xFF),
-            PrimaryButtonHover: Color.FromRgb(0x34, 0xBC, 0xE6),
-            PrimaryButtonPressed: Color.FromRgb(0x14, 0x98, 0xC6),
-            SecondaryButton: Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF),
-            SecondaryButtonBorder: Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF),
-            SecondaryButtonHover: Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF),
-            SecondaryButtonPressed: Color.FromArgb(0x2B, 0xFF, 0xFF, 0xFF),
-            FloatingCard: Color.FromArgb(0xD9, 0x16, 0x1A, 0x20),
-            FloatingCardBorder: Color.FromArgb(0x2B, 0xFF, 0xFF, 0xFF),
-            ShellScrim: Color.FromArgb(0x09, 0x00, 0x00, 0x00),
-            ShellTopHighlight: Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF),
+            ShellBackground: Color.FromRgb(0x19, 0x21, 0x2A),
+            EditorWorkspace: Color.FromRgb(0x20, 0x29, 0x33),
+            IslandBackground: Color.FromRgb(0x24, 0x2E, 0x38),
+            IslandBorder: Color.FromRgb(0x43, 0x52, 0x60),
+            IslandButton: Color.FromRgb(0x2C, 0x37, 0x43),
+            IslandButtonHover: Color.FromRgb(0x3B, 0x4B, 0x5A),
+            IslandButtonPressed: Color.FromRgb(0x45, 0x5B, 0x6A),
+            IslandButtonActive: Color.FromRgb(0x16, 0x42, 0x51),
+            IslandButtonActiveBorder: Color.FromRgb(0x44, 0x9A, 0xAF),
+            EditorFocus: Color.FromRgb(0x99, 0xE0, 0xEF),
+            IslandText: Color.FromRgb(0xEF, 0xF5, 0xF8),
+            IslandMutedText: Color.FromRgb(0xB6, 0xC3, 0xCE),
+            PrimaryButton: Color.FromRgb(0x10, 0x71, 0x8B),
+            PrimaryButtonBorder: Color.FromRgb(0x3C, 0x8F, 0xA6),
+            PrimaryButtonHover: Color.FromRgb(0x0F, 0x78, 0x91),
+            PrimaryButtonPressed: Color.FromRgb(0x17, 0x5F, 0x74),
+            SecondaryButton: Color.FromRgb(0x2E, 0x3B, 0x47),
+            SecondaryButtonBorder: Color.FromRgb(0x50, 0x61, 0x71),
+            SecondaryButtonHover: Color.FromRgb(0x3B, 0x4B, 0x59),
+            SecondaryButtonPressed: Color.FromRgb(0x45, 0x58, 0x67),
             InlineTextInputBackground: Color.FromArgb(0xD9, 0x1A, 0x1E, 0x25),
             InlineTextInputBorder: Color.FromArgb(0x66, 0xCC, 0xF3, 0xFF),
             InlineTextInputForeground: Color.FromRgb(0xF4, 0xF7, 0xFB),
-            PopupPanelBackground: Color.FromArgb(0xF0, 0x18, 0x1C, 0x22),
-            PopupPanelBorder: Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF),
             DeleteButtonBackground: Color.FromArgb(0x3A, 0xD9, 0x48, 0x41),
             DeleteButtonBorder: Color.FromArgb(0x80, 0xFF, 0xB0, 0xAA),
             DeleteButtonForeground: Colors.White,
-            IslandDivider: Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF),
+            IslandDivider: Color.FromRgb(0x44, 0x54, 0x63),
             ScrollBarTrack: Color.FromArgb(0x2B, 0x25, 0x2C, 0x36),
             ScrollBarThumb: Color.FromArgb(0x76, 0x86, 0x93, 0xA2),
             ScrollBarThumbHover: Color.FromArgb(0x9A, 0xA1, 0xAD, 0xBA),
             ScrollBarThumbPressed: Color.FromArgb(0xC0, 0xB7, 0xC3, 0xCF),
-            SliderTrack: Color.FromRgb(0x30, 0x33, 0x3A),
-            SliderFill: Color.FromRgb(0x1A, 0xA9, 0xD8),
-            SliderFillHover: Color.FromRgb(0x34, 0xBC, 0xE6),
+            SliderTrack: Color.FromRgb(0x4A, 0x5B, 0x69),
+            SliderFill: Color.FromRgb(0x5E, 0xBB, 0xD1),
+            SliderFillHover: Color.FromRgb(0x99, 0xE0, 0xEF),
             SliderThumb: Colors.White,
-            SliderThumbBorder: Color.FromArgb(0x26, 0x00, 0x00, 0x00),
-            GlowStart: Color.FromArgb(0x44, 0xFF, 0xB8, 0x6C),
-            GlowMiddle: Color.FromArgb(0x14, 0xFF, 0x7A, 0x00),
-            GlowEnd: Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+            SliderThumbBorder: Color.FromRgb(0x85, 0x99, 0xA6));
 
         internal static readonly ThemePalette Light = new(
-            ShellBackground: Color.FromRgb(0xF4, 0xF7, 0xFB),
-            EditorWorkspace: Color.FromRgb(0xEC, 0xF1, 0xF6),
-            EditorCanvas: Color.FromRgb(0xD8, 0xE0, 0xE8),
-            IslandBackground: Color.FromArgb(0xEC, 0xFF, 0xFF, 0xFF),
-            IslandBorder: Color.FromArgb(0x33, 0x95, 0xA7, 0xB9),
-            IslandButton: Color.FromArgb(0xE0, 0xF9, 0xFB, 0xFD),
-            IslandButtonHover: Color.FromArgb(0xF2, 0xF2, 0xF8, 0xFC),
-            IslandButtonPressed: Color.FromArgb(0xFF, 0xE6, 0xEE, 0xF4),
-            IslandButtonActive: Color.FromRgb(0x0C, 0x8E, 0xC5),
-            IslandButtonActiveBorder: Color.FromArgb(0x6E, 0x84, 0xCA, 0xEC),
-            IslandText: Color.FromRgb(0x1D, 0x26, 0x31),
-            IslandMutedText: Color.FromRgb(0x6C, 0x79, 0x87),
-            PrimaryButton: Color.FromRgb(0x0C, 0x8E, 0xC5),
-            PrimaryButtonBorder: Color.FromArgb(0x6E, 0x84, 0xCA, 0xEC),
-            PrimaryButtonHover: Color.FromRgb(0x1A, 0x9F, 0xD5),
-            PrimaryButtonPressed: Color.FromRgb(0x0A, 0x7D, 0xB1),
-            SecondaryButton: Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF),
-            SecondaryButtonBorder: Color.FromArgb(0xC7, 0xD6, 0xE2, 0xEC),
-            SecondaryButtonHover: Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-            SecondaryButtonPressed: Color.FromArgb(0xFF, 0xEA, 0xF1, 0xF7),
-            FloatingCard: Color.FromArgb(0xF4, 0xFF, 0xFF, 0xFF),
-            FloatingCardBorder: Color.FromArgb(0xCC, 0xD5, 0xE0, 0xEA),
-            ShellScrim: Color.FromArgb(0x00, 0x00, 0x00, 0x00),
-            ShellTopHighlight: Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF),
+            ShellBackground: Color.FromRgb(0xF0, 0xF3, 0xF6),
+            EditorWorkspace: Color.FromRgb(0xE8, 0xED, 0xF1),
+            IslandBackground: Color.FromRgb(0xFB, 0xFC, 0xFD),
+            IslandBorder: Color.FromRgb(0xCA, 0xD5, 0xDE),
+            IslandButton: Color.FromRgb(0xF1, 0xF4, 0xF7),
+            IslandButtonHover: Color.FromRgb(0xE2, 0xEB, 0xF0),
+            IslandButtonPressed: Color.FromRgb(0xD3, 0xE0, 0xE8),
+            IslandButtonActive: Color.FromRgb(0xDD, 0xF0, 0xF5),
+            IslandButtonActiveBorder: Color.FromRgb(0x39, 0x83, 0x98),
+            EditorFocus: Color.FromRgb(0x07, 0x59, 0x6D),
+            IslandText: Color.FromRgb(0x20, 0x2E, 0x39),
+            IslandMutedText: Color.FromRgb(0x52, 0x64, 0x72),
+            PrimaryButton: Color.FromRgb(0x09, 0x6B, 0x86),
+            PrimaryButtonBorder: Color.FromRgb(0x08, 0x5E, 0x77),
+            PrimaryButtonHover: Color.FromRgb(0x0B, 0x76, 0x91),
+            PrimaryButtonPressed: Color.FromRgb(0x08, 0x57, 0x6E),
+            SecondaryButton: Color.FromRgb(0xF5, 0xF7, 0xF9),
+            SecondaryButtonBorder: Color.FromRgb(0xC0, 0xCD, 0xD7),
+            SecondaryButtonHover: Color.FromRgb(0xE5, 0xED, 0xF2),
+            SecondaryButtonPressed: Color.FromRgb(0xD4, 0xE0, 0xE8),
             InlineTextInputBackground: Color.FromArgb(0xF4, 0xFF, 0xFF, 0xFF),
             InlineTextInputBorder: Color.FromArgb(0x99, 0x9D, 0xC0, 0xD8),
             InlineTextInputForeground: Color.FromRgb(0x1D, 0x26, 0x31),
-            PopupPanelBackground: Color.FromArgb(0xFA, 0xFF, 0xFF, 0xFF),
-            PopupPanelBorder: Color.FromArgb(0xCC, 0xD5, 0xE0, 0xEA),
             DeleteButtonBackground: Color.FromRgb(0xFE, 0xEA, 0xEA),
             DeleteButtonBorder: Color.FromRgb(0xF2, 0xB8, 0xB5),
             DeleteButtonForeground: Color.FromRgb(0xB4, 0x23, 0x2E),
-            IslandDivider: Color.FromArgb(0xCC, 0xD5, 0xE0, 0xEA),
+            IslandDivider: Color.FromRgb(0xCB, 0xD6, 0xDF),
             ScrollBarTrack: Color.FromArgb(0x18, 0x95, 0xA7, 0xB9),
             ScrollBarThumb: Color.FromArgb(0x82, 0x7C, 0x8A, 0x99),
             ScrollBarThumbHover: Color.FromArgb(0xA8, 0x62, 0x72, 0x84),
             ScrollBarThumbPressed: Color.FromArgb(0xD0, 0x4B, 0x5C, 0x70),
-            SliderTrack: Color.FromRgb(0xD8, 0xE1, 0xEA),
-            SliderFill: Color.FromRgb(0x16, 0xA7, 0xD6),
-            SliderFillHover: Color.FromRgb(0x0C, 0x8E, 0xC5),
+            SliderTrack: Color.FromRgb(0xCA, 0xD7, 0xE1),
+            SliderFill: Color.FromRgb(0x24, 0x7C, 0x95),
+            SliderFillHover: Color.FromRgb(0x07, 0x59, 0x6D),
             SliderThumb: Colors.White,
-            SliderThumbBorder: Color.FromArgb(0x3A, 0x6F, 0x7D, 0x8B),
-            GlowStart: Color.FromArgb(0x26, 0x69, 0xC2, 0xFF),
-            GlowMiddle: Color.FromArgb(0x18, 0x8F, 0xD4, 0xBE),
-            GlowEnd: Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+            SliderThumbBorder: Color.FromRgb(0x68, 0x81, 0x91));
     }
 
     private sealed record EditorDocumentState(
@@ -5742,10 +5830,8 @@ internal abstract class AnnotationBase
 
     static AnnotationBase()
     {
-        if (HandleBrush.CanFreeze)
-        {
-            HandleBrush.Freeze();
-        }
+        HandleBrush.Freeze();
+        MarchingDashArray.Freeze();
     }
 
     public double Scale { get; set; } = 1.0;

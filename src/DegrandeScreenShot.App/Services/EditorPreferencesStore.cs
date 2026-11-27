@@ -3,7 +3,13 @@ using System.Text.Json;
 
 namespace DegrandeScreenShot.App.Services;
 
-internal sealed class EditorPreferencesStore
+internal interface IEditorPreferencesStore
+{
+    EditorPreferences Load();
+    void Save(EditorPreferences preferences);
+}
+
+internal sealed class EditorPreferencesStore : IEditorPreferencesStore
 {
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -21,7 +27,7 @@ internal sealed class EditorPreferencesStore
 
     internal static event EventHandler? PreferencesChanged;
 
-    internal EditorPreferences Load()
+    public EditorPreferences Load()
     {
         lock (SaveLock)
         {
@@ -47,7 +53,7 @@ internal sealed class EditorPreferencesStore
         }
     }
 
-    internal void Save(EditorPreferences preferences)
+    public void Save(EditorPreferences preferences)
     {
         lock (SaveLock)
         {

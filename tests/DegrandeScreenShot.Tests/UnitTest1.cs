@@ -182,6 +182,7 @@ public class CapturedImageTests
     }
 }
 
+[Collection("Editor windows")]
 public class EditorWindowInitializationTests
 {
     [Fact]
@@ -197,7 +198,11 @@ public class EditorWindowInitializationTests
                 var image = BitmapSource.Create(4, 4, 96, 96, PixelFormats.Bgra32, null, pixels, stride: 16);
                 image.Freeze();
 
-                window = new EditorWindow(image);
+                var saved = EditorPreferences.Default with { ArrowBodyScale = 1.75 };
+                var preferences = new InMemoryEditorPreferences(saved);
+                window = new EditorWindow(preferences, image);
+                Assert.Equal(0, preferences.SaveCount);
+                Assert.Same(saved, preferences.Load());
                 Assert.True(window.ImageAspectRatioLockButton.IsChecked);
                 Assert.Equal("Ratio locked", window.ImageAspectRatioLockLabel.Text);
                 Assert.Equal("4", window.ImageWidthTextBox.Text);

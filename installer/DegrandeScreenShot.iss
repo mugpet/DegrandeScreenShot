@@ -3,7 +3,7 @@
 #define MyAppExeName "DegrandeScreenShot.App.exe"
 
 #ifndef AppVersion
-  #define AppVersion "0.2.30"
+  #define AppVersion "0.2.31"
 #endif
 
 #ifndef PublishDir
