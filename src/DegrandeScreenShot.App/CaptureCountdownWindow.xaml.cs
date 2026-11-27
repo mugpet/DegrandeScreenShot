@@ -31,7 +31,6 @@ public partial class CaptureCountdownWindow : Window
         }
 
         Close();
-        await Task.Delay(120);
     }
 
     protected override void OnSourceInitialized(EventArgs e)

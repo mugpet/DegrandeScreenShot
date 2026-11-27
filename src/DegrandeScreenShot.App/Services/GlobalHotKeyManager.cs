@@ -8,6 +8,7 @@ namespace DegrandeScreenShot.App.Services;
 public sealed class GlobalHotKeyManager : IDisposable
 {
     private const int WmHotKey = 0x0312;
+    private const uint ModNoRepeat = 0x4000;
     private static int _nextHotKeyId = 0x1208;
 
     private readonly Window _window;
@@ -32,7 +33,7 @@ public sealed class GlobalHotKeyManager : IDisposable
         _source = HwndSource.FromHwnd(handle);
         _source?.AddHook(WndProc);
 
-        if (!RegisterHotKey(handle, _hotKeyId, (uint)_modifierKeys, (uint)KeyInterop.VirtualKeyFromKey(_key)))
+        if (!RegisterHotKey(handle, _hotKeyId, (uint)_modifierKeys | ModNoRepeat, (uint)KeyInterop.VirtualKeyFromKey(_key)))
         {
             throw new InvalidOperationException($"Could not register the global hotkey {_modifierKeys} + {_key}. Another app may already be using it.");
         }
@@ -53,8 +54,8 @@ public sealed class GlobalHotKeyManager : IDisposable
     {
         if (msg == WmHotKey && wParam.ToInt32() == _hotKeyId)
         {
-            _callback();
             handled = true;
+            _window.Dispatcher.InvokeAsync(_callback, System.Windows.Threading.DispatcherPriority.Input);
         }
 
         return IntPtr.Zero;

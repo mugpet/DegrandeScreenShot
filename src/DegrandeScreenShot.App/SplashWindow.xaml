@@ -17,40 +17,24 @@
         <Storyboard x:Key="FadeInStoryboard">
             <DoubleAnimation Storyboard.TargetName="SplashBorder" 
                              Storyboard.TargetProperty="Opacity" 
-                             From="0.0" To="1.0" Duration="0:0:0.4">
+                             From="0.85" To="1.0" Duration="0:0:0.12">
                 <DoubleAnimation.EasingFunction>
                     <CubicEase EasingMode="EaseOut"/>
                 </DoubleAnimation.EasingFunction>
             </DoubleAnimation>
             <DoubleAnimation Storyboard.TargetName="MainContent" 
                              Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" 
-                             From="20" To="0" Duration="0:0:0.45">
+                             From="4" To="0" Duration="0:0:0.12">
                 <DoubleAnimation.EasingFunction>
                     <CircleEase EasingMode="EaseOut"/>
                 </DoubleAnimation.EasingFunction>
             </DoubleAnimation>
         </Storyboard>
         
-        <Storyboard x:Key="FadeOutStoryboard">
-            <DoubleAnimation Storyboard.TargetName="SplashBorder" 
-                             Storyboard.TargetProperty="Opacity" 
-                             From="1.0" To="0.0" Duration="0:0:0.3">
-                <DoubleAnimation.EasingFunction>
-                    <CubicEase EasingMode="EaseIn"/>
-                </DoubleAnimation.EasingFunction>
-            </DoubleAnimation>
-            <DoubleAnimation Storyboard.TargetName="MainContent" 
-                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" 
-                             From="0" To="-15" Duration="0:0:0.3">
-                <DoubleAnimation.EasingFunction>
-                    <CubicEase EasingMode="EaseIn"/>
-                </DoubleAnimation.EasingFunction>
-            </DoubleAnimation>
-        </Storyboard>
     </Window.Resources>
     
     <Border x:Name="SplashBorder" 
-            Opacity="0"
+            Opacity="1"
             CornerRadius="24" 
             BorderThickness="1.5"
             Margin="10">
@@ -79,7 +63,7 @@
         
         <Grid x:Name="MainContent">
             <Grid.RenderTransform>
-                <TranslateTransform Y="20"/>
+                <TranslateTransform />
             </Grid.RenderTransform>
             
             <Grid.RowDefinitions>
@@ -122,7 +106,7 @@
                 
                 <!-- Status Display -->
                 <TextBlock x:Name="StatusLabel"
-                           Text="Initializing components..." 
+                           Text="Opening launcher…"
                            FontFamily="Segoe UI Variable Text, Segoe UI" 
                            FontWeight="Normal" 
                            FontSize="12" 

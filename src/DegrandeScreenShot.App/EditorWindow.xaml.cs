@@ -84,6 +84,27 @@ public partial class EditorWindow : Window
     private readonly Stack<EditorDocumentState> _redoHistory = [];
     private readonly ScreenshotLibraryService _screenshotLibrary = new();
     private readonly string? _sourcePath;
+    private readonly Task<string?>? _pendingSourcePath;
+    private bool _isClosed;
+    private bool _frameRequested;
+    private bool _sizeCalculationRunning;
+    private BitmapSource? _measuredImage;
+    private long? _measuredBytes;
+    private bool _sizeFromFile;
+    private bool _isExporting;
+    private bool _closeAfterExport;
+    private BitmapSource? _renderedImage;
+    private AnnotationBase? _renderedSelection;
+    private AnnotationBase? _renderedHover;
+    private Rect? _renderedCrop;
+    private AnnotationBase? _renderedTextEditor;
+    private readonly List<RenderedAnnotation> _renderedAnnotations = [];
+
+    private sealed class RenderedAnnotation
+    {
+        public AnnotationBase? Annotation { get; set; }
+        public List<UIElement> Elements { get; } = [];
+    }
     private readonly CapturedCursor? _capturedCursor;
     private readonly BitmapSource _baseImageOriginal;
     private static int _nextEditorNumber = 1;
@@ -179,7 +200,8 @@ public partial class EditorWindow : Window
     public EditorWindow(
         BitmapSource baseImage,
         string? sourcePath = null,
-        CapturedCursor? capturedCursor = null)
+        CapturedCursor? capturedCursor = null,
+        Task<string?>? pendingSourcePath = null)
     {
         InitializeComponent();
         ApplyEditorPreferences(_preferencesStore.Load());
@@ -187,6 +209,7 @@ public partial class EditorWindow : Window
         _baseImageOriginal = baseImage;
         _baseImageLockedAspectRatio = GetAspectRatio(baseImage.PixelWidth, baseImage.PixelHeight);
         _sourcePath = sourcePath;
+        _pendingSourcePath = pendingSourcePath;
         _capturedCursor = capturedCursor;
         ImageAspectRatioLockButton.Checked += ImageAspectRatioLockButton_Changed;
         ImageAspectRatioLockButton.Unchecked += ImageAspectRatioLockButton_Changed;
@@ -197,6 +220,14 @@ public partial class EditorWindow : Window
         SourceInitialized += EditorWindow_SourceInitialized;
         LocationChanged += EditorWindow_LocationChanged;
         DpiChanged += EditorWindow_DpiChanged;
+        Closing += (_, args) =>
+        {
+            if (_isExporting)
+            {
+                args.Cancel = true;
+                _closeAfterExport = true;
+            }
+        };
         Closed += EditorWindow_Closed;
         PreviewMouseDown += EditorWindow_PreviewMouseDown;
         SystemEvents.UserPreferenceChanged += SystemEvents_UserPreferenceChanged;
@@ -214,6 +245,7 @@ public partial class EditorWindow : Window
     private void EditorWindow_Loaded(object sender, RoutedEventArgs e)
     {
         AttachSelectionActionIslandToFooter();
+        MeasureDisplayedImageSize();
 
         if (_hasFittedInitialWindowSize)
         {
@@ -313,6 +345,8 @@ public partial class EditorWindow : Window
 
     private void EditorWindow_Closed(object? sender, EventArgs e)
     {
+        _isClosed = true;
+        CancelCanvasFrame();
         _imageImportCts?.Cancel();
         _imageImportCts?.Dispose();
         _imageImportCts = null;
@@ -395,6 +429,11 @@ public partial class EditorWindow : Window
         SetGradientBrushColors("ShellGlowBrush", palette.GlowStart, palette.GlowMiddle, palette.GlowEnd);
         UpdateThemeModeButton();
         ApplyNativeTitleBarTheme();
+        _renderedImage = null;
+        if (IsLoaded)
+        {
+            RefreshCanvas();
+        }
     }
 
     private ThemePreference ResolveThemeMode()
@@ -756,7 +795,7 @@ public partial class EditorWindow : Window
 
     private bool TryBeginExistingAnnotationInteraction(Point point)
     {
-        var annotation = GetAnnotationsInHitTestOrder().FirstOrDefault(candidate => candidate.HitTest(point));
+        var annotation = FindAnnotationAt(point);
         if (annotation is null)
         {
             return false;
@@ -799,7 +838,7 @@ public partial class EditorWindow : Window
 
     private bool TryBeginTextEditOnDoubleClick(Point point)
     {
-        if (GetAnnotationsInHitTestOrder().FirstOrDefault(candidate => candidate.HitTest(point)) is not TextAnnotation textAnnotation)
+        if (FindAnnotationAt(point) is not TextAnnotation textAnnotation)
         {
             return false;
         }
@@ -832,7 +871,7 @@ public partial class EditorWindow : Window
                 UpdateDrawingAnnotation(drawPoint, initializeBeforeMove: true);
             }
 
-            RefreshCanvas();
+            RequestCanvasFrame();
             return;
         }
 
@@ -858,7 +897,7 @@ public partial class EditorWindow : Window
                     break;
             }
 
-            RefreshCanvas();
+            RequestCanvasFrame();
             return;
         }
 
@@ -873,7 +912,6 @@ public partial class EditorWindow : Window
             var delta = currentViewportPoint - _panStartViewportPoint.Value;
             ArtworkScrollViewer.ScrollToHorizontalOffset(Math.Clamp(_panStartHorizontalOffset - delta.X, 0, ArtworkScrollViewer.ScrollableWidth));
             ArtworkScrollViewer.ScrollToVerticalOffset(Math.Clamp(_panStartVerticalOffset - delta.Y, 0, ArtworkScrollViewer.ScrollableHeight));
-            UpdateSelectionActionIsland();
             return;
         }
 
@@ -881,7 +919,7 @@ public partial class EditorWindow : Window
         {
             var mousePos = e.GetPosition(AnnotationCanvas);
             UpdateHoveredAnnotation(ToDocumentPoint(mousePos));
-            UpdateEditorCursor(mousePos);
+            UpdateEditorCursor(mousePos, hoverTested: true);
             return;
         }
 
@@ -908,7 +946,7 @@ public partial class EditorWindow : Window
                 break;
         }
 
-        RefreshCanvas();
+        RequestCanvasFrame();
     }
 
     private void AnnotationCanvas_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -946,7 +984,7 @@ public partial class EditorWindow : Window
             }
         }
 
-        var annotation = GetAnnotationsInHitTestOrder().FirstOrDefault(candidate => candidate.HitTest(point));
+        var annotation = FindAnnotationAt(point);
         if (annotation is null)
         {
             _selectedAnnotation = null;
@@ -981,7 +1019,7 @@ public partial class EditorWindow : Window
         }
 
         _hoveredAnnotation = null;
-        RefreshCanvas();
+        RequestCanvasFrame();
         UpdateEditorCursor();
     }
 
@@ -1005,7 +1043,7 @@ public partial class EditorWindow : Window
         }
 
         _dragStart = null;
-    _drawMoveLastPoint = null;
+        _drawMoveLastPoint = null;
         var shouldCommitHistory = _dragOperation is DragOperation.Draw or DragOperation.Move or DragOperation.Handle or DragOperation.CropCreate or DragOperation.CropMove or DragOperation.CropResize;
         var capturedOperation = _dragOperation;
         _dragOperation = DragOperation.None;
@@ -2055,12 +2093,9 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void Copy_Click(object sender, RoutedEventArgs e)
+    private async void Copy_Click(object sender, RoutedEventArgs e)
     {
-        ClearSelectionBeforeExport();
-        var bitmap = RenderComposite();
-        ClipboardHelper.SetImage(bitmap);
-        ShowPreview(bitmap);
+        await App.TrackOutputAsync(ExportAsync(copy: true));
     }
 
     private void CursorVisibilityButton_Click(object sender, RoutedEventArgs e)
@@ -2070,43 +2105,93 @@ public partial class EditorWindow : Window
         UpdateCapturedCursorVisual();
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private async void Save_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(_savedPath))
-        {
-            _savedPath = CreateDefaultSavePath();
-        }
-
-        ClearSelectionBeforeExport();
-        var bitmap = SaveToPath(_savedPath);
-        ShowPreview(bitmap);
+        await App.TrackOutputAsync(ExportAsync(copy: false));
     }
 
-    private void SaveAs_Click(object sender, RoutedEventArgs e)
+    private async void SaveAs_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new Microsoft.Win32.SaveFileDialog
-        {
-            Filter = "PNG Image|*.png",
-            AddExtension = true,
-            DefaultExt = ".png",
-            InitialDirectory = _screenshotLibrary.RootDirectory,
-            FileName = System.IO.Path.GetFileName(CreateDefaultSavePath()),
-        };
+        await App.TrackOutputAsync(ExportAsync(copy: false, choosePath: true));
+    }
 
-        if (dialog.ShowDialog(this) == true)
+    private async Task ExportAsync(bool copy, bool choosePath = false)
+    {
+        if (_isExporting)
         {
-            _savedPath = dialog.FileName;
+            return;
+        }
+
+        _isExporting = true;
+        ExportButtons.IsEnabled = false;
+        ExportStatus.Text = copy ? "Copying…" : "Saving…";
+        ExportStatus.Visibility = Visibility.Visible;
+        try
+        {
+            if (choosePath)
+            {
+                var suggestedPath = await CreateDefaultSavePathAsync();
+                if (_closeAfterExport || _isClosed)
+                {
+                    return;
+                }
+
+                var dialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Filter = "PNG Image|*.png",
+                    AddExtension = true,
+                    DefaultExt = ".png",
+                    InitialDirectory = _screenshotLibrary.RootDirectory,
+                    FileName = System.IO.Path.GetFileName(suggestedPath),
+                };
+                if (dialog.ShowDialog(this) != true)
+                {
+                    return;
+                }
+                _savedPath = dialog.FileName;
+            }
+
             ClearSelectionBeforeExport();
-            var bitmap = SaveToPath(_savedPath);
-            ShowPreview(bitmap);
-        }
-    }
+            var bitmap = RenderComposite();
+            if (copy)
+            {
+                await ClipboardHelper.SetImageAsync(bitmap);
+            }
+            else if (_savedPath is { } path)
+            {
+                await Task.Run(() => ScreenshotLibraryService.SavePng(bitmap, path));
+            }
+            else
+            {
+                var sourcePath = _pendingSourcePath is null ? _sourcePath : await _pendingSourcePath;
+                _savedPath = await Task.Run(() => string.IsNullOrWhiteSpace(sourcePath)
+                    ? _screenshotLibrary.SaveCapture(bitmap)
+                    : _screenshotLibrary.SaveEditedCapture(bitmap, sourcePath));
+            }
 
-    private BitmapSource SaveToPath(string path)
-    {
-        var bitmap = RenderComposite();
-        ScreenshotLibraryService.SavePng(bitmap, path);
-        return bitmap;
+            if (!_closeAfterExport && !_isClosed)
+            {
+                ShowPreview(bitmap);
+            }
+        }
+        catch (Exception exception)
+        {
+            if (!_isClosed)
+            {
+                MessageBox.Show(this, exception.Message, copy ? "Copy failed" : "Save failed",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            _isExporting = false;
+            ExportButtons.IsEnabled = true;
+            ExportStatus.Visibility = Visibility.Collapsed;
+            if (_closeAfterExport && !_isClosed)
+            {
+                Close();
+            }
+        }
     }
 
     private void AddImageFromFile_Click(object sender, RoutedEventArgs e)
@@ -3537,16 +3622,17 @@ public partial class EditorWindow : Window
         _isUpdatingObscureColorStrength = false;
     }
 
-    private string CreateDefaultSavePath()
+    private async Task<string> CreateDefaultSavePathAsync()
     {
-        return !string.IsNullOrWhiteSpace(_sourcePath)
-            ? _screenshotLibrary.CreateEditedPath(_sourcePath)
-            : _screenshotLibrary.CreateCapturePath(DateTime.Now);
+        var sourcePath = _pendingSourcePath is null ? _sourcePath : await _pendingSourcePath;
+        return await Task.Run(() => !string.IsNullOrWhiteSpace(sourcePath)
+            ? _screenshotLibrary.CreateEditedPath(sourcePath)
+            : _screenshotLibrary.CreateCapturePath(DateTime.Now));
     }
 
     private void SelectAnnotationAt(Point point)
     {
-        _selectedAnnotation = GetAnnotationsInHitTestOrder().FirstOrDefault(annotation => annotation.HitTest(point));
+        _selectedAnnotation = FindAnnotationAt(point);
         _hoveredAnnotation = _selectedAnnotation;
         _contextMenuAnnotation = _selectedAnnotation;
         UpdateSelectionAnnotationControls(_selectedAnnotation);
@@ -3722,14 +3808,14 @@ public partial class EditorWindow : Window
 
     private void UpdateHoveredAnnotation(Point point)
     {
-        var hovered = GetAnnotationsInHitTestOrder().FirstOrDefault(annotation => annotation.HitTest(point));
+        var hovered = FindAnnotationAt(point);
         if (ReferenceEquals(hovered, _hoveredAnnotation))
         {
             return;
         }
 
         _hoveredAnnotation = hovered;
-        RefreshCanvas();
+        RequestCanvasFrame();
     }
 
     private BitmapSource RenderComposite()
@@ -3761,31 +3847,123 @@ public partial class EditorWindow : Window
         return renderTarget;
     }
 
-    private void RefreshCanvas()
+    private void RequestCanvasFrame()
     {
-        AnnotationCanvas.Children.Clear();
-        foreach (var annotation in GetAnnotationsInRenderOrder())
+        if (!_frameRequested)
         {
-            if (ReferenceEquals(annotation, _editingTextAnnotation))
+            _frameRequested = true;
+            CompositionTarget.Rendering += RenderCanvasFrame;
+        }
+    }
+
+    private void CancelCanvasFrame()
+    {
+        if (_frameRequested)
+        {
+            CompositionTarget.Rendering -= RenderCanvasFrame;
+            _frameRequested = false;
+        }
+    }
+
+    private void RenderCanvasFrame(object? sender, EventArgs e)
+    {
+        CancelCanvasFrame();
+        bool draggingAnnotation = _dragOperation is DragOperation.Draw or DragOperation.Move or DragOperation.Handle;
+        bool selectionChanged = !ReferenceEquals(_renderedSelection, _selectedAnnotation);
+        RefreshAnnotationLayers(draggingAnnotation);
+        if (selectionChanged)
+        {
+            UpdateSelectionActionIsland();
+        }
+        ApplyCropButton.IsEnabled = _cropSelection is { Width: > 0, Height: > 0 };
+        if (draggingAnnotation && _selectedAnnotation is ImageAnnotation image)
+        {
+            UpdateImageResizeValues(image);
+        }
+    }
+
+    private void RefreshAnnotationLayers(bool editedAnnotationChanged)
+    {
+        // Keep completed annotations attached. Rebuilding a highlight also blends its underlying pixels.
+        bool imageChanged = !ReferenceEquals(_renderedImage, BaseImage.Source);
+        for (int i = 0; i < _annotations.Count; i++)
+        {
+            var annotation = _annotations[i];
+            if (i == _renderedAnnotations.Count)
+            {
+                _renderedAnnotations.Add(new RenderedAnnotation());
+            }
+            var layer = _renderedAnnotations[i];
+            bool selected = ReferenceEquals(annotation, _selectedAnnotation);
+            bool hovered = ReferenceEquals(annotation, _hoveredAnnotation);
+            bool hidden = ReferenceEquals(annotation, _editingTextAnnotation);
+            if (ReferenceEquals(layer.Annotation, annotation) && !imageChanged
+                && selected == ReferenceEquals(annotation, _renderedSelection)
+                && hovered == ReferenceEquals(annotation, _renderedHover)
+                && hidden == ReferenceEquals(annotation, _renderedTextEditor)
+                && !(editedAnnotationChanged && (selected || ReferenceEquals(annotation, _contextMenuAnnotation))))
             {
                 continue;
             }
 
-            if (annotation is HighlightAnnotation highlightAnnotation)
+            RemoveRenderedElements(layer);
+            layer.Annotation = annotation;
+            if (hidden)
             {
-                highlightAnnotation.Render(AnnotationCanvas, annotation == _selectedAnnotation, annotation == _hoveredAnnotation, _workingImage);
+                continue;
+            }
+
+            int first = AnnotationCanvas.Children.Count;
+            if (annotation is HighlightAnnotation highlight)
+            {
+                highlight.Render(AnnotationCanvas, selected, hovered, _workingImage);
             }
             else
             {
-                annotation.Render(AnnotationCanvas, annotation == _selectedAnnotation, annotation == _hoveredAnnotation);
+                annotation.Render(AnnotationCanvas, selected, hovered);
+            }
+            for (int j = first; j < AnnotationCanvas.Children.Count; j++)
+            {
+                var element = AnnotationCanvas.Children[j];
+                Panel.SetZIndex(element, i);
+                layer.Elements.Add(element);
             }
         }
 
-        if (_cropSelection is { } cropSelection)
+        while (_renderedAnnotations.Count > _annotations.Count)
         {
-            RenderCropOverlay(cropSelection);
+            RemoveRenderedElements(_renderedAnnotations[^1]);
+            _renderedAnnotations.RemoveAt(_renderedAnnotations.Count - 1);
+        }
+        if (_renderedCrop != _cropSelection || imageChanged)
+        {
+            CropOverlay.Children.Clear();
+            if (_cropSelection is { } crop)
+            {
+                RenderCropOverlay(crop);
+            }
         }
 
+        _renderedImage = (BitmapSource?)BaseImage.Source;
+        _renderedCrop = _cropSelection;
+        _renderedSelection = _selectedAnnotation;
+        _renderedHover = _hoveredAnnotation;
+        _renderedTextEditor = _editingTextAnnotation;
+    }
+
+    private void RemoveRenderedElements(RenderedAnnotation layer)
+    {
+        foreach (var element in layer.Elements)
+        {
+            AnnotationCanvas.Children.Remove(element);
+        }
+        layer.Elements.Clear();
+    }
+
+    private void RefreshCanvas()
+    {
+        CancelCanvasFrame();
+        RefreshAnnotationLayers(editedAnnotationChanged: true);
         var isCropEditingVisible = _currentTool == EditorTool.Crop || _cropSelection is not null;
         CropActionsPanel.Visibility = isCropEditingVisible ? Visibility.Visible : Visibility.Collapsed;
         UndoCropPanel.Visibility = Visibility.Collapsed;
@@ -3800,14 +3978,16 @@ public partial class EditorWindow : Window
         UpdateSelectionActionIsland();
     }
 
-    private IEnumerable<AnnotationBase> GetAnnotationsInRenderOrder()
+    private AnnotationBase? FindAnnotationAt(Point point)
     {
-        return _annotations;
-    }
-
-    private IEnumerable<AnnotationBase> GetAnnotationsInHitTestOrder()
-    {
-        return _annotations.AsEnumerable().Reverse();
+        for (int i = _annotations.Count - 1; i >= 0; i--)
+        {
+            if (_annotations[i].HitTest(point))
+            {
+                return _annotations[i];
+            }
+        }
+        return null;
     }
 
     private bool ShouldConstrainAspectRatio()
@@ -4252,7 +4432,7 @@ public partial class EditorWindow : Window
             BaseImage.RenderTransform = Transform.Identity;
             AnnotationCanvas.RenderTransform = new TranslateTransform(-normalized.X, -normalized.Y);
             UpdateCapturedCursorVisual();
-            UpdateImageDimensions(normalized.Width * (_workingImage.DpiX / 96.0), normalized.Height * (_workingImage.DpiY / 96.0));
+            UpdateImageDimensions();
             ApplyZoomTransform();
             QueueCenterArtworkInViewport();
             return;
@@ -4270,7 +4450,7 @@ public partial class EditorWindow : Window
         BaseImage.RenderTransform = Transform.Identity;
         AnnotationCanvas.RenderTransform = Transform.Identity;
         UpdateCapturedCursorVisual();
-        UpdateImageDimensions(_workingImage.PixelWidth, _workingImage.PixelHeight);
+        UpdateImageDimensions();
         ApplyZoomTransform();
         QueueCenterArtworkInViewport();
     }
@@ -4304,28 +4484,90 @@ public partial class EditorWindow : Window
             : Visibility.Collapsed;
     }
 
-    private void UpdateImageDimensions(double width, double height)
+    private void UpdateImageDimensions()
     {
-        var roundedWidth = Math.Max(1, (int)Math.Round(width));
-        var roundedHeight = Math.Max(1, (int)Math.Round(height));
-        var fileSizeLabel = GetDisplayedImageFileSizeLabel();
-        ImageDimensionsText.Text = $"{roundedWidth} x {roundedHeight} | {fileSizeLabel}";
-        ToolTipService.SetToolTip(ImageDimensionsText, $"Current artwork dimensions: {roundedWidth} x {roundedHeight} pixels. Estimated PNG size: {fileSizeLabel}.");
+        if (BaseImage.Source is not BitmapSource source)
+        {
+            return;
+        }
+        var dimensions = $"{source.PixelWidth} × {source.PixelHeight}";
+        var size = ReferenceEquals(source, _measuredImage) && _measuredBytes is long bytes ? FormatFileSize(bytes) : null;
+        ImageDimensionsText.Text = size is null ? dimensions : $"{dimensions} | {size}";
+        ImageDimensionsText.ToolTip = size is null
+            ? $"Current artwork dimensions: {dimensions} pixels."
+            : $"{dimensions} pixels. {(_sizeFromFile ? "Original PNG size" : "Estimated PNG size")}: {size}.";
+        if (IsLoaded)
+        {
+            MeasureDisplayedImageSize();
+        }
     }
 
-    private string GetDisplayedImageFileSizeLabel()
+    private async void MeasureDisplayedImageSize()
     {
-        if (BaseImage.Source is not BitmapSource sourceBitmap)
+        if (_sizeCalculationRunning)
         {
-            return "0 B";
+            return;
+        }
+
+        _sizeCalculationRunning = true;
+        try
+        {
+            // Rapid resizing can change the source many times during a single encode.
+            // Only run one estimate at a time and publish it if that image is still displayed.
+            while (!_isClosed && BaseImage.Source is BitmapSource source && !ReferenceEquals(source, _measuredImage))
+            {
+                await Task.Delay(180);
+                if (_isClosed || !ReferenceEquals(BaseImage.Source, source))
+                {
+                    continue;
+                }
+
+                long? size = null;
+                bool fromFile = false;
+                try
+                {
+                    var path = ReferenceEquals(source, _baseImageOriginal)
+                        ? (_pendingSourcePath is null ? _sourcePath : await _pendingSourcePath)
+                        : null;
+                    if (_isClosed || !ReferenceEquals(BaseImage.Source, source))
+                    {
+                        continue;
+                    }
+
+                    var frozen = source.IsFrozen ? source : (BitmapSource)source.GetAsFrozen();
+                    (size, fromFile) = await Task.Run(() => GetPngSize(frozen, path));
+                }
+                catch (Exception)
+                {
+                    // An optional size estimate can fail even when the image remains editable.
+                }
+                if (!_isClosed && ReferenceEquals(BaseImage.Source, source))
+                {
+                    _measuredImage = source;
+                    _measuredBytes = size;
+                    _sizeFromFile = fromFile;
+                    UpdateImageDimensions();
+                }
+            }
+        }
+        finally
+        {
+            _sizeCalculationRunning = false;
+        }
+    }
+
+    private static (long Size, bool FromFile) GetPngSize(BitmapSource source, string? path)
+    {
+        if (path is not null && new FileInfo(path) is { Exists: true } file)
+        {
+            return (file.Length, true);
         }
 
         var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(sourceBitmap));
-
+        encoder.Frames.Add(BitmapFrame.Create(source));
         using var stream = new MemoryStream();
         encoder.Save(stream);
-        return FormatFileSize(stream.Length);
+        return (stream.Length, false);
     }
 
     private static string FormatFileSize(long byteCount)
@@ -4402,7 +4644,7 @@ public partial class EditorWindow : Window
             Math.Abs(_zoomLevel - 1.0) < 0.001 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);
     }
 
-    private void UpdateEditorCursor(Point? mousePos = null)
+    private void UpdateEditorCursor(Point? mousePos = null, bool hoverTested = false)
     {
         if (AnnotationCanvas == null)
         {
@@ -4512,7 +4754,7 @@ public partial class EditorWindow : Window
         }
 
         // Check if hovering over any annotation body
-        var hovered = GetAnnotationsInHitTestOrder().FirstOrDefault(annotation => annotation.HitTest(docPoint));
+        var hovered = hoverTested ? _hoveredAnnotation : FindAnnotationAt(docPoint);
         if (hovered is not null)
         {
             AnnotationCanvas.Cursor = Cursors.SizeAll;
@@ -4672,7 +4914,10 @@ public partial class EditorWindow : Window
             return;
         }
 
-        UpdateSelectionActionIsland();
+        if (!ReferenceEquals(SelectionActionIsland.Parent, EditorFooterStack))
+        {
+            UpdateSelectionActionIsland();
+        }
         UpdateInlineTextEditorState();
     }
 
@@ -4701,7 +4946,7 @@ public partial class EditorWindow : Window
         };
         Canvas.SetLeft(fill, cropRect.Left);
         Canvas.SetTop(fill, cropRect.Top);
-        AnnotationCanvas.Children.Add(fill);
+        CropOverlay.Children.Add(fill);
 
         foreach (var handlePoint in GetCropHandlePoints(cropRect).Values)
         {
@@ -4716,7 +4961,7 @@ public partial class EditorWindow : Window
             };
             Canvas.SetLeft(handle, handlePoint.X - 6);
             Canvas.SetTop(handle, handlePoint.Y - 6);
-            AnnotationCanvas.Children.Add(handle);
+            CropOverlay.Children.Add(handle);
         }
     }
 
@@ -4736,7 +4981,7 @@ public partial class EditorWindow : Window
         };
         Canvas.SetLeft(shade, left);
         Canvas.SetTop(shade, top);
-        AnnotationCanvas.Children.Add(shade);
+        CropOverlay.Children.Add(shade);
     }
 
     private static Rect NormalizeCropRect(Rect rect)
@@ -6604,11 +6849,21 @@ internal sealed class TextAnnotation : AnnotationBase, IBorderShadowAnnotation, 
         };
     }
 
+    private (string Text, double FontSize, double BoxWidth, double BorderWidth, bool Bold, TextAlignment Alignment)? _measuredStyle;
+    private Size _measuredBounds;
+
     private Size MeasureBounds()
     {
+        var style = (Text, FontSize, BoxWidth, BorderWidth, IsBold, TextAlignment);
+        if (_measuredStyle == style)
+        {
+            return _measuredBounds;
+        }
         var contentBorder = CreateContentBorder(isHovered: false, borderColor: Darken(TextColor, 0.18));
         contentBorder.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        return contentBorder.DesiredSize;
+        _measuredStyle = style;
+        _measuredBounds = contentBorder.DesiredSize;
+        return _measuredBounds;
     }
 
     private Border CreateContentBorder(bool isHovered, Color borderColor)
@@ -7234,30 +7489,25 @@ internal sealed class HighlightAnnotation : AnnotationBase, IBorderShadowAnnotat
             return null;
         }
 
-        var sourcePixels = CopyBackgroundPixels(background, new Int32Rect(left, top, width, height));
+        var blendedPixels = CopyBackgroundPixels(background, new Int32Rect(left, top, width, height));
         var maskPixels = CreateGeometryMaskPixels(geometry, left, top, width, height, background.DpiX, background.DpiY);
-        var blendedPixels = new byte[sourcePixels.Length];
-        var blendStrength = GetBlendStrength(isHovered);
-
-        for (var i = 0; i < sourcePixels.Length; i += 4)
+        var strength = GetBlendStrength(isHovered);
+        Span<byte> blue = stackalloc byte[256];
+        Span<byte> green = stackalloc byte[256];
+        Span<byte> red = stackalloc byte[256];
+        for (int i = 0; i < 256; i++)
         {
-            var maskAlpha = maskPixels[i + 3];
-            if (maskAlpha == 0)
-            {
-                continue;
-            }
+            blue[i] = BlendHighlightChannel((byte)i, HighlightColor.B, strength);
+            green[i] = BlendHighlightChannel((byte)i, HighlightColor.G, strength);
+            red[i] = BlendHighlightChannel((byte)i, HighlightColor.R, strength);
+        }
 
-            var baseBlue = sourcePixels[i];
-            var baseGreen = sourcePixels[i + 1];
-            var baseRed = sourcePixels[i + 2];
-            var targetRed = BlendHighlightChannel(baseRed, HighlightColor.R, blendStrength);
-            var targetGreen = BlendHighlightChannel(baseGreen, HighlightColor.G, blendStrength);
-            var targetBlue = BlendHighlightChannel(baseBlue, HighlightColor.B, blendStrength);
-
-            blendedPixels[i] = targetBlue;
-            blendedPixels[i + 1] = targetGreen;
-            blendedPixels[i + 2] = targetRed;
-            blendedPixels[i + 3] = maskAlpha;
+        for (int i = 0; i < blendedPixels.Length; i += 4)
+        {
+            blendedPixels[i] = blue[blendedPixels[i]];
+            blendedPixels[i + 1] = green[blendedPixels[i + 1]];
+            blendedPixels[i + 2] = red[blendedPixels[i + 2]];
+            blendedPixels[i + 3] = maskPixels[i + 3];
         }
 
         var stride = width * 4;

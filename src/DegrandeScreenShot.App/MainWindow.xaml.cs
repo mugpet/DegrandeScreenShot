@@ -39,6 +39,9 @@ public partial class MainWindow : Window
     private bool _isUpdatingStartupToggle;
     private bool _hotKeysRegistered;
     private bool _isCaptureTypeSelectorOpen;
+    private bool _captureInProgress;
+    private bool _readingClipboard;
+    private readonly CancellationTokenSource _shutdown = new();
     private GitHubRelease? _latestReleaseCached;
     private GitHubAsset? _installerAssetCached;
     private bool _hasAutoPoppedUpdate;
@@ -53,13 +56,13 @@ public partial class MainWindow : Window
         UpdateStartupToggle();
         _hotKeyManagers =
         [
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D0, ShowGalleryFromHotKey),
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D4, BeginDelayedCaptureFromHotKey),
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D5, BeginCaptureTypeSelectorFromHotKey),
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D6, BeginClipboardCaptureFromHotKey),
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D7, BeginEditorCaptureFromHotKey),
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D8, BeginClipboardEditorFromHotKey),
-            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D9, BeginScrollingWindowCaptureFromHotKey),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D0, ShowGallery),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D4, () => ShowCaptureTypeSelector(CaptureTypeSelectorMode.Delay)),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D5, () => ShowCaptureTypeSelector()),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D6, () => StartCapture(CaptureLaunchMode.CopyToClipboard)),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D7, () => StartCapture(CaptureLaunchMode.OpenEditor)),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D8, OpenClipboardInEditor),
+            new GlobalHotKeyManager(this, ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, Key.D9, StartScrollingWindowCapture),
         ];
 
         if (_startHiddenInTray)
@@ -115,6 +118,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _shutdown.Cancel();
         _galleryWindow?.Close();
         _galleryWindow = null;
         _trayIcon.Visible = false;
@@ -437,63 +441,10 @@ public partial class MainWindow : Window
         updateWindow.ShowDialog();
     }
 
-    private void BeginCaptureTypeSelectorFromHotKey()
-    {
-        Dispatcher.Invoke(() =>
-        {
-            try
-            {
-                ShowCaptureTypeSelector();
-            }
-            catch (Exception exception)
-            {
-                System.Windows.MessageBox.Show(this, exception.Message, "Capture selector failed", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        });
-    }
-
-    private void BeginClipboardCaptureFromHotKey()
-    {
-        Dispatcher.Invoke(() => StartCapture(CaptureLaunchMode.CopyToClipboard));
-    }
-
-    private void BeginEditorCaptureFromHotKey()
-    {
-        Dispatcher.Invoke(() => StartCapture(CaptureLaunchMode.OpenEditor));
-    }
-
-    private void BeginClipboardEditorFromHotKey()
-    {
-        Dispatcher.Invoke(OpenClipboardInEditor);
-    }
-
-    private void BeginScrollingWindowCaptureFromHotKey()
-    {
-        Dispatcher.Invoke(StartScrollingWindowCapture);
-    }
-
-    private void BeginDelayedCaptureFromHotKey()
-    {
-        Dispatcher.Invoke(() =>
-        {
-            try
-            {
-                ShowDelayedCaptureSelector();
-            }
-            catch (Exception exception)
-            {
-                System.Windows.MessageBox.Show(this, exception.Message, "Delayed capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        });
-    }
-
-    private void ShowGalleryFromHotKey()
-    {
-        Dispatcher.Invoke(ShowGallery);
-    }
-
     internal void ShowGallery()
     {
+        if (_isCaptureTypeSelectorOpen || _captureInProgress || _isExplicitExit) return;
+
         if (_galleryWindow is { IsLoaded: true })
         {
             if (_galleryWindow.WindowState == WindowState.Minimized)
@@ -520,273 +471,189 @@ public partial class MainWindow : Window
         gallery.Activate();
     }
 
-    private async void StartCapture(CaptureLaunchMode launchMode)
+    private async void StartCapture(
+        CaptureLaunchMode launchMode,
+        CaptureSelectionMode selectionMode = CaptureSelectionMode.WindowOrRegion,
+        int delaySeconds = 0)
     {
-        bool wasLauncherVisible = IsVisible;
-        bool wasPreviewVisible = _previewWindow != null && _previewWindow.IsVisible;
-
-        try
-        {
-            // Keep launcher visible during capture to support taking a screenshot of the launcher itself
-            // if (wasLauncherVisible)
-            // {
-            //     Hide();
-            // }
-            if (wasPreviewVisible)
-            {
-                _previewWindow?.Hide();
-            }
-
-            // Wait 130ms for the window hide transitions to complete and OS to redraw background
-            await System.Threading.Tasks.Task.Delay(130);
-
-            IsEnabled = false;
-
-            var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
-            var result = await CaptureOverlayWindow.ShowOverlayAsync(captureFrame, launchMode);
-
-            if (!result.Success || result.CaptureResult is null)
-            {
-                // Cancelled, restore previous states
-                if (wasLauncherVisible)
-                {
-                    ShowLauncher();
-                }
-                if (wasPreviewVisible)
-                {
-                    _previewWindow?.Show();
-                }
-                return;
-            }
-
-            // Successful capture! Close the old preview window.
-            if (_previewWindow != null)
-            {
-                _previewWindow.Close();
-                _previewWindow = null;
-            }
-
-            var displayImage = result.CaptureResult.Render();
-            var savedPath = _screenshotLibrary.SaveCapture(displayImage);
-            ShowCapturePreview(displayImage);
-
-            if (result.CaptureResult.Action == PostCaptureAction.Edit)
-            {
-                OpenEditor(result.CaptureResult.Image, savedPath, result.CaptureResult.Cursor);
-            }
-            else
-            {
-                if (wasLauncherVisible)
-                {
-                    ShowLauncher();
-                }
-            }
-        }
-        catch (Exception exception)
-        {
-            if (wasLauncherVisible)
-            {
-                ShowLauncher();
-            }
-            if (wasPreviewVisible)
-            {
-                _previewWindow?.Show();
-            }
-            System.Windows.MessageBox.Show(this, exception.Message, "Capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            IsEnabled = true;
-        }
-    }
-
-    private async void StartScrollingWindowCapture()
-    {
-        bool wasLauncherVisible = IsVisible;
-        bool wasPreviewVisible = _previewWindow != null && _previewWindow.IsVisible;
-
-        try
-        {
-            // Keep launcher visible during capture to support taking a screenshot of the launcher itself
-            // if (wasLauncherVisible)
-            // {
-            //     Hide();
-            // }
-            if (wasPreviewVisible)
-            {
-                _previewWindow?.Hide();
-            }
-
-            // Wait 130ms for the window hide transitions to complete and OS to redraw background
-            await System.Threading.Tasks.Task.Delay(130);
-
-            IsEnabled = false;
-
-            var captureFrame = _screenCaptureService.CaptureVirtualDesktop();
-            var result = await CaptureOverlayWindow.ShowOverlayAsync(captureFrame, CaptureLaunchMode.OpenEditor, CaptureSelectionMode.ScrollTarget);
-
-            if (!result.Success || result.SelectedScrollTarget is not { } scrollTarget)
-            {
-                // Cancelled, restore previous states
-                if (wasLauncherVisible)
-                {
-                    ShowLauncher();
-                }
-                if (wasPreviewVisible)
-                {
-                    _previewWindow?.Show();
-                }
-                return;
-            }
-
-            // Successful capture! Close the old preview window.
-            if (_previewWindow != null)
-            {
-                _previewWindow.Close();
-                _previewWindow = null;
-            }
-
-            var image = _screenCaptureService.CaptureScrollingWindow(scrollTarget.Window.Handle, ToScreenRectangle(captureFrame, scrollTarget.Bounds));
-            var savedPath = _screenshotLibrary.SaveCapture(image);
-            ShowCapturePreview(image);
-            OpenEditor(image, savedPath);
-        }
-        catch (OperationCanceledException)
-        {
-            if (wasLauncherVisible)
-            {
-                ShowLauncher();
-            }
-            if (wasPreviewVisible)
-            {
-                _previewWindow?.Show();
-            }
-        }
-        catch (Exception exception)
-        {
-            if (wasLauncherVisible)
-            {
-                ShowLauncher();
-            }
-            if (wasPreviewVisible)
-            {
-                _previewWindow?.Show();
-            }
-            System.Windows.MessageBox.Show(this, exception.Message, "Scrolling capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            IsEnabled = true;
-        }
-    }
-
-    private void OpenClipboardInEditor()
-    {
-        try
-        {
-            OpenEditor(GetClipboardEditorImage());
-        }
-        catch (Exception exception)
-        {
-            System.Windows.MessageBox.Show(this, exception.Message, "Clipboard import failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void OpenEditor(BitmapSource image, string? sourcePath = null, CapturedCursor? capturedCursor = null)
-    {
-        var editor = new EditorWindow(image, sourcePath, capturedCursor);
-        editor.Show();
-        editor.Activate();
-    }
-
-    private void ShowDelayedCaptureSelector()
-    {
-        if (_isCaptureTypeSelectorOpen)
+        if (_isCaptureTypeSelectorOpen || _captureInProgress || _isExplicitExit)
         {
             return;
         }
 
-        _isCaptureTypeSelectorOpen = true;
+        _captureInProgress = true;
+        var previousPreview = _previewWindow is { IsVisible: true } ? _previewWindow : null;
         try
         {
-            var selector = new CaptureTypeSelectorWindow(GetCursorPosition(), CaptureTypeSelectorMode.Delay);
-            var result = selector.ShowDialog();
-            if (result == true && selector.SelectedDelaySeconds is { } seconds)
+            previousPreview?.Hide();
+            // Leave the launcher visible so it can be captured. Wait for the compositor to
+            // present closed selectors, tray menus and previews before reading the screen.
+            var frame = await Task.Run(() =>
             {
-                StartDelayedCapture(seconds);
-            }
-        }
-        finally
-        {
-            _isCaptureTypeSelectorOpen = false;
-        }
-    }
-
-    private async void StartDelayedCapture(int delaySeconds)
-    {
-        var wasLauncherVisible = IsVisible;
-        var wasPreviewVisible = _previewWindow is { IsVisible: true };
-
-        try
-        {
-            if (wasPreviewVisible)
-            {
-                _previewWindow?.Hide();
-            }
-
-            await Task.Delay(130);
+                WaitForDesktopRedraw();
+                return _screenCaptureService.CaptureVirtualDesktop();
+            });
+            if (_isExplicitExit) return;
             IsEnabled = false;
+            var selection = await CaptureOverlayWindow.ShowOverlayAsync(frame, launchMode, selectionMode);
+            if (!selection.Success || _isExplicitExit) return;
 
-            var selectionFrame = _screenCaptureService.CaptureVirtualDesktop();
-            var selectionResult = await CaptureOverlayWindow.ShowOverlayAsync(
-                selectionFrame,
-                CaptureLaunchMode.SelectOnly);
-            if (!selectionResult.Success || selectionResult.SelectedBounds is not { HasArea: true } selectedBounds)
+            CaptureResult? result = selection.CaptureResult;
+            if (selection.SelectedScrollTarget is { } scrollTarget)
             {
-                if (wasLauncherVisible)
+                var bounds = ToScreenRectangle(frame, scrollTarget.Bounds);
+                var scroll = Task.Run(() => _screenCaptureService.CaptureScrollingWindow(
+                    scrollTarget.Window.Handle, bounds, _shutdown.Token));
+                var image = await App.TrackOutputAsync(scroll);
+                result = new CaptureResult(PostCaptureAction.Edit, image);
+            }
+            else if (delaySeconds > 0 && selection.SelectedBounds is { HasArea: true } selectedBounds)
+            {
+                var bounds = ToScreenRectangle(frame, selectedBounds);
+                await new CaptureCountdownWindow(bounds).RunAsync(delaySeconds);
+                if (_isExplicitExit) return;
+                var delayed = await Task.Run(() =>
                 {
-                    ShowLauncher();
-                }
-
-                if (wasPreviewVisible)
-                {
-                    _previewWindow?.Show();
-                }
-
-                return;
+                    WaitForDesktopRedraw();
+                    return _screenCaptureService.CaptureScreenRegion(bounds);
+                });
+                result = new CaptureResult(PostCaptureAction.Edit, delayed.Image, delayed.Cursor);
             }
 
-            _previewWindow?.Close();
-            _previewWindow = null;
-
-            var screenBounds = ToScreenRectangle(selectionFrame, selectedBounds);
-            var countdown = new CaptureCountdownWindow(screenBounds);
-            await countdown.RunAsync(delaySeconds);
-
-            var capturedImage = _screenCaptureService.CaptureScreenRegion(screenBounds);
-            var displayImage = capturedImage.Render();
-            var savedPath = _screenshotLibrary.SaveCapture(displayImage);
-            ShowCapturePreview(displayImage);
-            OpenEditor(capturedImage.Image, savedPath, capturedImage.Cursor);
+            if (result is null || _isExplicitExit) return;
+            previousPreview = null;
+            await App.TrackOutputAsync(PresentCaptureAsync(result));
+        }
+        catch (OperationCanceledException)
+        {
+            // Escape cancels live capture.
         }
         catch (Exception exception)
         {
-            if (wasLauncherVisible)
+            if (!_isExplicitExit)
             {
-                ShowLauncher();
+                MessageBox.Show(this, exception.Message, "Capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
-
-            if (wasPreviewVisible)
-            {
-                _previewWindow?.Show();
-            }
-
-            System.Windows.MessageBox.Show(this, exception.Message, "Delayed capture failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
+            _captureInProgress = false;
             IsEnabled = true;
+            if (!_isExplicitExit && previousPreview is not null && ReferenceEquals(previousPreview, _previewWindow))
+            {
+                previousPreview.Show();
+            }
         }
+    }
+
+    private async Task PresentCaptureAsync(CaptureResult result)
+    {
+        var capturedAt = DateTime.Now;
+        // A CroppedBitmap keeps its entire virtual desktop alive. Give a small
+        // region its own pixels when an editor could hold it open for hours.
+        if (result.Action == PostCaptureAction.Edit && result.Image is CroppedBitmap crop
+            && (long)crop.PixelWidth * crop.PixelHeight * 2 < (long)crop.Source.PixelWidth * crop.Source.PixelHeight)
+        {
+            var region = await Task.Run(() =>
+            {
+                var bitmap = new WriteableBitmap(crop);
+                bitmap.Freeze();
+                return bitmap;
+            });
+            result = result with { Image = region };
+        }
+        var displayImage = result.Cursor is null ? result.Image : await Task.Run(() => result.Render());
+        var copy = result.Action == PostCaptureAction.Copy;
+        var png = copy ? Task.Run(() => ClipboardHelper.EncodePng(displayImage)) : null;
+        var clipboard = png is null ? Task.CompletedTask : ClipboardHelper.SetImageAsync(displayImage, png);
+        var sourcePath = App.TrackOutputAsync(SaveOriginalAsync(displayImage, capturedAt, png));
+
+        if (!copy)
+        {
+            if (!_isExplicitExit)
+            {
+                ShowCapturePreview(displayImage);
+                OpenEditor(result.Image, capturedCursor: result.Cursor, pendingSourcePath: sourcePath);
+            }
+            return;
+        }
+
+        await clipboard;
+        if (!_isExplicitExit)
+        {
+            ShowCapturePreview(displayImage);
+            if (IsVisible) Activate();
+        }
+    }
+
+    private async Task<string?> SaveOriginalAsync(
+        BitmapSource image, DateTime capturedAt, Task<ArraySegment<byte>>? encodedPng)
+    {
+        try
+        {
+            if (encodedPng is null)
+            {
+                return await Task.Run(() => _screenshotLibrary.SaveCapture(image, capturedAt));
+            }
+
+            var png = await encodedPng;
+            return await Task.Run(() =>
+            {
+                using var stream = new MemoryStream(png.Array!, png.Offset, png.Count, writable: false);
+                return _screenshotLibrary.SaveCapture(stream, capturedAt);
+            });
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show($"Could not save the original capture to the gallery.\n{exception.Message}",
+                "Capture save failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            return null;
+        }
+    }
+
+    private static void WaitForDesktopRedraw()
+    {
+        if (DwmFlush() < 0)
+        {
+            Thread.Sleep(130);
+        }
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmFlush();
+
+    private void StartScrollingWindowCapture()
+    {
+        StartCapture(CaptureLaunchMode.OpenEditor, CaptureSelectionMode.ScrollTarget);
+    }
+
+    private async void OpenClipboardInEditor()
+    {
+        if (_isCaptureTypeSelectorOpen || _captureInProgress || _isExplicitExit || _readingClipboard) return;
+        _readingClipboard = true;
+        try
+        {
+            var image = await ClipboardHelper.ReadImageAsync(GetClipboardEditorImage);
+            if (!_isExplicitExit) OpenEditor(image);
+        }
+        catch (Exception exception)
+        {
+            if (!_isExplicitExit)
+            {
+                MessageBox.Show(this, exception.Message, "Clipboard import failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            _readingClipboard = false;
+        }
+    }
+
+    private void OpenEditor(BitmapSource image, CapturedCursor? capturedCursor = null, Task<string?>? pendingSourcePath = null)
+    {
+        var editor = new EditorWindow(image, capturedCursor: capturedCursor, pendingSourcePath: pendingSourcePath);
+        editor.Show();
+        editor.Activate();
     }
 
     private static System.Drawing.Rectangle ToScreenRectangle(CaptureFrame captureFrame, DegrandeScreenShot.Core.PixelRect overlayRect)
@@ -798,59 +665,59 @@ public partial class MainWindow : Window
             overlayRect.Height);
     }
 
-    private void ShowCaptureTypeSelector()
+    private void ShowCaptureTypeSelector(CaptureTypeSelectorMode mode = CaptureTypeSelectorMode.CaptureType)
     {
-        if (_isCaptureTypeSelectorOpen)
+        if (_isCaptureTypeSelectorOpen || _captureInProgress || _isExplicitExit)
         {
             return;
         }
 
         _isCaptureTypeSelectorOpen = true;
+        CaptureTypeSelectorWindow selector;
         try
         {
-            var selector = new CaptureTypeSelectorWindow(GetCursorPosition());
-            var result = selector.ShowDialog();
-            if (result != true)
-            {
-                return;
-            }
-
-            if (selector.SelectedDelaySeconds is { } delaySeconds)
-            {
-                StartDelayedCapture(delaySeconds);
-                return;
-            }
-
-            if (selector.SelectedAction is not { } action)
-            {
-                return;
-            }
-
-            switch (action)
-            {
-                case CaptureTypeSelection.CopyRegion:
-                    StartCapture(CaptureLaunchMode.CopyToClipboard);
-                    break;
-                case CaptureTypeSelection.OpenEditor:
-                    StartCapture(CaptureLaunchMode.OpenEditor);
-                    break;
-                case CaptureTypeSelection.ClipboardEditor:
-                    OpenClipboardInEditor();
-                    break;
-                case CaptureTypeSelection.ScrollingWindow:
-                    StartScrollingWindowCapture();
-                    break;
-            }
+            selector = new CaptureTypeSelectorWindow(GetCursorPosition(), mode);
+            if (selector.ShowDialog() != true) return;
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, exception.Message, "Capture selector failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
         }
         finally
         {
             _isCaptureTypeSelectorOpen = false;
         }
+
+        if (selector.SelectedDelaySeconds is { } seconds)
+        {
+            StartCapture(CaptureLaunchMode.SelectOnly, delaySeconds: seconds);
+            return;
+        }
+
+        switch (selector.SelectedAction)
+        {
+            case CaptureTypeSelection.CopyRegion:
+                StartCapture(CaptureLaunchMode.CopyToClipboard);
+                break;
+            case CaptureTypeSelection.OpenEditor:
+                StartCapture(CaptureLaunchMode.OpenEditor);
+                break;
+            case CaptureTypeSelection.ClipboardEditor:
+                OpenClipboardInEditor();
+                break;
+            case CaptureTypeSelection.ScrollingWindow:
+                StartScrollingWindowCapture();
+                break;
+        }
     }
 
     internal void ShowLauncher()
     {
-        // Position window early before showing it to prevent visible first-frame layout jumps
+        if (_isCaptureTypeSelectorOpen || _captureInProgress || _isExplicitExit) return;
+
+        var entering = !IsVisible || WindowState == WindowState.Minimized;
+        // Position before showing to avoid a first-frame jump.
         PositionInCenterOfActiveWindow();
 
         if (!IsVisible)
@@ -867,7 +734,7 @@ public partial class MainWindow : Window
         ShowInTaskbar = true;
 
         // Play entrance animation
-        if (Resources["WindowEntranceStoryboard"] is Storyboard entranceAnimation)
+        if (entering && SystemParameters.ClientAreaAnimation && Resources["WindowEntranceStoryboard"] is Storyboard entranceAnimation)
         {
             entranceAnimation.Begin(this);
         }
@@ -981,25 +848,22 @@ public partial class MainWindow : Window
         return trayIcon;
     }
 
-    private void ExitFromTray()
+    private async void ExitFromTray()
     {
+        if (_isExplicitExit) return;
         _isExplicitExit = true;
+        _shutdown.Cancel();
         _trayIcon.Visible = false;
+        await App.WaitForPendingOutputsAsync();
         System.Windows.Application.Current.Shutdown();
     }
+
+    private void OpenGallery_Click(object sender, RoutedEventArgs e) => ShowGallery();
 
     private void OpenEditorDemo_Click(object sender, RoutedEventArgs e)
     {
         var demoImage = CreateDemoBitmap();
         OpenEditor(demoImage);
-    }
-
-    internal void SetCachedUpdate(GitHubRelease release, GitHubAsset asset)
-    {
-        _latestReleaseCached = release;
-        _installerAssetCached = asset;
-        ShowUpdateUI(release);
-        TriggerAutoPopupIfNeeded();
     }
 
     private void ShowUpdateUI(GitHubRelease release)
@@ -1044,8 +908,9 @@ public partial class MainWindow : Window
             var clipboardImage = System.Windows.Clipboard.GetImage();
             if (clipboardImage is not null)
             {
-                if (clipboardImage.CanFreeze && !clipboardImage.IsFrozen)
+                if (!clipboardImage.IsFrozen)
                 {
+                    if (!clipboardImage.CanFreeze) clipboardImage = new WriteableBitmap(clipboardImage);
                     clipboardImage.Freeze();
                 }
 

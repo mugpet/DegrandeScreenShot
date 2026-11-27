@@ -8,6 +8,38 @@ namespace DegrandeScreenShot.App;
 /// </summary>
 public partial class App : System.Windows.Application
 {
+	// Accessed from the UI dispatcher. Keep the dispatcher alive while user-initiated
+	// saves, copies and live screen capture cleanup finish during an explicit exit.
+	private static readonly HashSet<Task> PendingOutputs = [];
+
+	internal static async Task TrackOutputAsync(Task operation)
+	{
+		PendingOutputs.Add(operation);
+		try
+		{
+			await operation;
+		}
+		finally
+		{
+			PendingOutputs.Remove(operation);
+		}
+	}
+
+	internal static async Task<T> TrackOutputAsync<T>(Task<T> operation)
+	{
+		await TrackOutputAsync((Task)operation);
+		return await operation;
+	}
+
+	internal static async Task WaitForPendingOutputsAsync()
+	{
+		while (PendingOutputs.Count > 0)
+		{
+			await Task.WhenAny(PendingOutputs);
+			PendingOutputs.RemoveWhere(task => task.IsCompleted);
+		}
+	}
+
 	private static readonly string LogFilePath = Path.Combine(
 		Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
 		"DegrandeScreenShot",
@@ -48,18 +80,15 @@ public partial class App : System.Windows.Application
 			isFirstRun = true;
 		}
 
-		var mainWindow = new MainWindow();
-		MainWindow = mainWindow;
-
 		if (isSilent || !isFirstRun)
 		{
-			mainWindow.InitializeHiddenTrayMode();
+			var launcher = new MainWindow();
+			MainWindow = launcher;
+			launcher.InitializeHiddenTrayMode();
 		}
 		else
 		{
-			// Launch the premium splash window
-			var splash = new SplashWindow(mainWindow);
-			splash.Show();
+			new SplashWindow().Show();
 		}
 	}
 
